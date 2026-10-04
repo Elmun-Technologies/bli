@@ -12,7 +12,7 @@ The `supabase/tests/phase2_integrity.sql` script uses a transaction and rolls it
 
 `.github/workflows/database-integrity.yml` runs for every branch push, pull request and manual dispatch on a fresh `ubuntu-24.04` runner with Docker. It installs the pinned Supabase CLI from the project lockfile, starts the local Postgres container, resets the database with every migration from zero, executes the SQL assertions with fail-fast `psql`, generates and checks the committed database types, then runs application tests, lint, typecheck and production build. It caches npm dependencies only—not the database or Docker volume.
 
-For a local clean run, install dependencies, ensure Docker and `psql` are available, then run `npm run verify` from the repository root. **This resets/destroys the local Supabase database.** The database-only command is `npm run verify:database`; it generates `src/lib/database/database.types.ts` from the verified local schema. Never point the command at production. A passing TypeScript build alone is not evidence that SQL migrations work.
+For a local clean run, install dependencies, ensure Docker and `psql` are available, then run `npm run verify` from the repository root. **This resets/destroys the local Supabase database.** The database-only command is `npm run verify:database`; it generates `src/lib/database/database.types.ts` from the verified local schema. `row-types.ts` only aliases generated rows; keep generated rows persistence-only and map them through validated domain types before DTO construction. Never point the command at production. A passing TypeScript build alone is not evidence that SQL migrations work.
 
 ## RLS is default-deny
 

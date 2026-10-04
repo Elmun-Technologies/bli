@@ -8,8 +8,8 @@ BLI is a location-intelligence workspace for business users: select an analysis 
 
 - **Phase 1 — implemented:** Next.js App Router interface, MapLibre map, synthetic Tashkent fixtures, selectable layers, radius control and map-click candidate state.
 - **Phase 2 — implemented in source:** ownership schema, workspace-safe composite constraints, PostGIS geography point tables, indexes, timestamp triggers, default-deny RLS, runtime coordinate validation and PII-allow-list GeoJSON adapter.
-- **Phase 2.5 — verification gate added:** a project-pinned CLI, clean-reset local script, catalog/integrity assertions, generated-type workflow and GitHub Actions workflow.
-- **LOCAL DATABASE NOT VERIFIED:** the project CLI is installed, but Docker and `psql` are unavailable; the first clean GitHub Actions run is the real database gate.
+- **Phase 2.5 — verification gate implemented:** a project-pinned CLI, clean-reset script, live catalog/integrity assertions, generated types and GitHub Actions coverage. The latest complete workflow run is the release authority.
+- **LOCAL DATABASE NOT VERIFIED:** Docker and `psql` are unavailable in this workspace; local app checks do not substitute for the CI database gate.
 - **NOT STARTED:** membership/authentication policies, live data access, imports, analytics, territories or scoring.
 
 See [database.md](database.md) for exact migration/schema/RLS detail and [setup.md](setup.md) for verification instructions.
@@ -51,7 +51,7 @@ Projects and datasets each belong to one workspace. They can be related many-to-
 
 Phase 2 defines distinct modules:
 
-1. **SQL persistence contract:** the ordered SQL migrations define Postgres rows and constraints. `src/lib/database/row-types.ts` provides explicit read-only TypeScript mirrors, but they are manual and not generated or verified against a live database here. Raw geography remains `unknown`; the SQL is canonical until local schema verification and generated type reconciliation. Keep all row types server-side.
+1. **SQL persistence contract:** the ordered SQL migrations define Postgres rows and constraints. `src/lib/database/database.types.ts` is generated from the clean, verified Supabase schema; `row-types.ts` contains aliases to those generated rows rather than duplicate column definitions. Raw geography is emitted as `unknown` and remains opaque until parsed. Keep all generated rows server-side and treat SQL constraints as canonical.
 2. **Domain/UI types:** `src/lib/domain/coordinates.ts` validates longitude/latitude tuples at runtime. `src/lib/domain/map-location.ts` describes UI locations and distinguishes `TransientCandidate` (unsaved UI state) from the persisted `analysis_locations` table defined in SQL.
 3. **Map DTO:** `src/lib/map/map-feature-adapter.ts` emits GeoJSON Point features with only `id`, `kind` and `category` properties. It accepts no name, address, phone or revenue fields; IDs are restricted to opaque database UUIDs or known synthetic fixture/candidate IDs. Coordinates are revalidated before serialization. This DTO, not a database row, is the MapLibre boundary. It omits `name` for every entity kind today. Phase 3/4 should keep customer DTOs strongly PII-limited; a separate normal business/POI DTO may explicitly allow a display name after review. Do not broaden this customer-safe DTO as a shortcut.
 
@@ -78,7 +78,7 @@ src/
   components/map/              MapLibre component and shared map props
   lib/data/demo-locations.ts   Synthetic Phase 1 fixtures only
   lib/domain/                  Runtime coordinate and domain types
-  lib/database/                Manual server-side row type mirrors
+  lib/database/                Generated DB rows and server-side aliases
   lib/geo/                     Circle geometry helper and unit tests
   lib/map/                     PII-safe GeoJSON adapter and tests
   lib/supabase/                Supabase server client (not yet used for feature data)
@@ -90,7 +90,7 @@ supabase/
 ## Future architecture checkpoints (not Phase 2 deliverables)
 
 - Add a `workspace_members` relationship and authentication/role-aware RLS before any client-visible persistence path.
-- Generate database types after migrations have actually applied to local Postgres; do not leak them into React/map code.
+- Regenerate database types after migrations have actually applied to the clean local/CI schema; do not leak them into React/map code.
 - Add server-side data access with workspace checks, safe selected columns and explicit row-to-domain/DTO mapping.
 - Define stable external IDs, data lineage, retention and import validation before real customer data is loaded.
 - Add analytics only after product definitions, data quality checks and a server-side query contract are agreed.

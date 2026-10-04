@@ -1,177 +1,45 @@
 /**
- * Explicit, read-only TypeScript mirrors of the Phase 2 SQL row columns.
- * The SQL migrations remain canonical; these are not generated or verified
- * against a live Supabase instance in this workspace.
+ * Compatibility aliases and data-access boundaries for generated database rows.
+ * `database.types.ts` is the sole source of truth for SQL row columns and is
+ * regenerated from the clean, verified local schema by `npm run verify:database`.
+ * Do not redeclare row fields here or hand-edit the generated file.
  *
- * Keep this module in server/data-access code. Do not import it into map/UI
- * components. Parse geography and numeric wire values into validated domain
- * types before constructing any display or GeoJSON DTO.
+ * Keep raw rows in server/data-access code. Parse them into domain mappings
+ * before constructing display DTOs; never pass customer rows to map components.
  */
-export type DatabaseUuid = string;
-export type DatabaseTimestamp = string;
-export type DatabaseDate = string;
+import type { Database } from './database.types';
 
-export type DatabaseJsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | DatabaseJsonValue[]
-  | { [key: string]: DatabaseJsonValue };
+type PublicTables = Database['public']['Tables'];
 
-export interface DatabaseJsonObject {
-  [key: string]: DatabaseJsonValue;
-}
+/** A Row type derived directly from the generated public schema. */
+export type DatabaseRow<TableName extends keyof PublicTables> =
+  PublicTables[TableName]['Row'];
+
+export type OrganizationRow = DatabaseRow<'organizations'>;
+export type WorkspaceRow = DatabaseRow<'workspaces'>;
+export type ProjectRow = DatabaseRow<'projects'>;
+export type DatasetRow = DatabaseRow<'datasets'>;
+export type ProjectDatasetRow = DatabaseRow<'project_datasets'>;
+export type LocationRow = DatabaseRow<'locations'>;
+/** Contains PII and commercial data; never pass this row to a map component. */
+export type CustomerRow = DatabaseRow<'customers'>;
+export type CompetitorRow = DatabaseRow<'competitors'>;
+export type BranchRow = DatabaseRow<'branches'>;
+export type AnalysisLocationRow = DatabaseRow<'analysis_locations'>;
 
 /**
- * PostGIS geography serialization varies by query/driver (for example, text
- * output versus an explicitly requested GeoJSON object). Keep raw values
- * opaque until a boundary parser validates them.
+ * PostGIS geography is emitted as `unknown` by the Supabase type generator.
+ * Keep that raw value opaque until a driver/query-specific parser validates it.
  */
-export type RawGeographyValue = unknown;
+export type RawGeographyValue = LocationRow['spatial_point'];
 
-/** PostgreSQL numeric should be parsed without assuming binary float precision. */
-export type RawNumericValue = string | number;
+/**
+ * Supabase currently generates PostgreSQL numeric fields as TypeScript number;
+ * precision-sensitive domain mappings must not assume binary floats are exact.
+ */
+export type RawNumericValue = NonNullable<CustomerRow['revenue']>;
 
-export interface OrganizationRow {
-  readonly id: DatabaseUuid;
-  readonly name: string;
-  readonly slug: string;
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-export interface WorkspaceRow {
-  readonly id: DatabaseUuid;
-  readonly organization_id: DatabaseUuid;
-  readonly name: string;
-  readonly slug: string;
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-export interface ProjectRow {
-  readonly id: DatabaseUuid;
-  readonly workspace_id: DatabaseUuid;
-  readonly name: string;
-  readonly description: string | null;
-  readonly status: 'active' | 'archived';
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-export interface DatasetRow {
-  readonly id: DatabaseUuid;
-  readonly workspace_id: DatabaseUuid;
-  readonly name: string;
-  readonly description: string | null;
-  readonly dataset_type: string;
-  readonly source: string | null;
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-export interface ProjectDatasetRow {
-  readonly project_id: DatabaseUuid;
-  readonly dataset_id: DatabaseUuid;
-  readonly workspace_id: DatabaseUuid;
-  readonly created_at: DatabaseTimestamp;
-}
-
-export interface LocationRow {
-  readonly id: DatabaseUuid;
-  readonly workspace_id: DatabaseUuid;
-  readonly dataset_id: DatabaseUuid;
-  readonly name: string;
-  readonly category: string;
-  readonly subcategory: string | null;
-  readonly address: string | null;
-  readonly spatial_point: RawGeographyValue;
-  readonly source: string | null;
-  readonly external_id: string | null;
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-/** Contains PII and commercial data; never pass this row to a map component. */
-export interface CustomerRow {
-  readonly id: DatabaseUuid;
-  readonly workspace_id: DatabaseUuid;
-  readonly dataset_id: DatabaseUuid;
-  readonly external_id: string | null;
-  readonly name: string | null;
-  readonly phone: string | null;
-  readonly company: string | null;
-  readonly address: string | null;
-  readonly spatial_point: RawGeographyValue;
-  readonly revenue: RawNumericValue | null;
-  readonly order_count: number | null;
-  readonly last_order_date: DatabaseDate | null;
-  readonly segment: string | null;
-  readonly source: string | null;
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-export interface CompetitorRow {
-  readonly id: DatabaseUuid;
-  readonly workspace_id: DatabaseUuid;
-  readonly dataset_id: DatabaseUuid;
-  readonly external_id: string | null;
-  readonly name: string;
-  readonly brand: string | null;
-  readonly category: string;
-  readonly subcategory: string | null;
-  readonly address: string | null;
-  readonly spatial_point: RawGeographyValue;
-  readonly source: string | null;
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-export interface BranchRow {
-  readonly id: DatabaseUuid;
-  readonly workspace_id: DatabaseUuid;
-  readonly dataset_id: DatabaseUuid;
-  readonly external_id: string | null;
-  readonly name: string;
-  readonly address: string | null;
-  readonly spatial_point: RawGeographyValue;
-  readonly revenue: RawNumericValue | null;
-  readonly customers_count: number | null;
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-export interface AnalysisLocationRow {
-  readonly id: DatabaseUuid;
-  readonly workspace_id: DatabaseUuid;
-  readonly project_id: DatabaseUuid;
-  readonly name: string;
-  readonly address: string | null;
-  readonly spatial_point: RawGeographyValue;
-  readonly metadata: DatabaseJsonObject;
-  readonly created_at: DatabaseTimestamp;
-  readonly updated_at: DatabaseTimestamp;
-}
-
-export interface Phase2DatabaseRows {
-  organizations: OrganizationRow;
-  workspaces: WorkspaceRow;
-  projects: ProjectRow;
-  datasets: DatasetRow;
-  project_datasets: ProjectDatasetRow;
-  locations: LocationRow;
-  customers: CustomerRow;
-  competitors: CompetitorRow;
-  branches: BranchRow;
-  analysis_locations: AnalysisLocationRow;
-}
+/** Every public Phase 2 table maps to its generated Row type. */
+export type Phase2DatabaseRows = {
+  [TableName in keyof PublicTables]: DatabaseRow<TableName>;
+};

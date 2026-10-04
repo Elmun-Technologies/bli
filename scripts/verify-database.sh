@@ -86,7 +86,13 @@ if [[ "$actual_cli_version" != "$expected_cli_version" ]]; then
     "$expected_cli_version" "$actual_cli_version" >&2
   exit 2
 fi
-printf 'Supabase CLI version: %s\n' "$actual_cli_version"
+psql_client_version="$(psql --version)"
+printf 'Supabase CLI version: %s\npsql client version: %s\n' \
+  "$actual_cli_version" "$psql_client_version"
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+  printf '::notice title=Database CLI versions::Supabase CLI %s; %s\n' \
+    "$actual_cli_version" "$psql_client_version"
+fi
 
 run_stage "Start local PostgreSQL through the Supabase CLI" supabase db start
 run_stage "Reset the local database and replay every migration from zero" \

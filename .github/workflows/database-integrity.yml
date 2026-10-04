@@ -53,18 +53,9 @@ jobs:
         id: verify_database
         run: npm run verify:database
 
-      - name: Export generated types for one-time schema audit
-        if: always() && steps.verify_database.outcome == 'success'
-        run: |
-          set -Eeuo pipefail
-          generated_file=src/lib/database/database.types.ts
-          test -s "$generated_file"
-          encoded="$(gzip --no-name --stdout "$generated_file" | base64 --wrap=0)"
-          printf '::notice title=Generated database.types.ts (gzip+base64)::%s\n' "$encoded"
-
       - name: Upload complete database verification output
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: database-verification-log-${{ github.run_id }}
           path: ${{ runner.temp }}/bli-database-verification.log
@@ -88,7 +79,7 @@ jobs:
 
       - name: Upload generated types for database-schema review
         if: always() && steps.verify_database.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: verified-database-types-${{ github.run_id }}
           path: src/lib/database/database.types.ts

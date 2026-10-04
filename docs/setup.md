@@ -74,11 +74,11 @@ The Phase 2 preflight expects PostGIS in schema `extensions`, `extensions.geogra
 
 The database verification script generates `src/lib/database/database.types.ts` from the just-reset local Postgres schema using the pinned Supabase CLI. **Do not hand-edit this generated file.** If it changes after `npm run verify:database`, review the migration that caused the change and commit the regenerated output; CI fails on uncommitted or stale generated types.
 
-Generated Supabase row types are persistence-only. Map code receives validated domain values and the PII-allow-listed GeoJSON DTO, never raw database rows. Keep customer name, phone, address and revenue out of generic map source properties. The SQL migrations remain canonical; the generated file must come from an applied schema, not a hand-authored approximation.
+Generated Supabase row types are persistence-only. `row-types.ts` now aliases generated `Row` types and does not redeclare database columns. The CLI emits PostGIS geography as `unknown` and PostgreSQL `numeric` as `number`; `RawGeographyValue` and `RawNumericValue` are derived aliases, not edited fields. A future precision-sensitive mapper must use a decimal-safe representation rather than assume JavaScript numbers are exact. The generator does not infer SQL `CHECK` constraints into literal unions or object-only JSON types. Map code receives validated domain values and the PII-allow-listed GeoJSON DTO, never raw database rows. Keep customer name, phone, address and revenue out of generic map source properties. The SQL migrations remain canonical; the generated file must come from an applied and verified schema, not a hand-authored approximation.
 
 ## Current local verification status
 
-The project CLI is installed and reports `2.119.0`, but Docker and `psql` are unavailable in this workspace. Therefore local database startup, migration replay, PostGIS/catalog assertions and database type generation **have not run here**. CI is the intended real PostgreSQL/PostGIS verification environment; no database result should be claimed until its workflow succeeds.
+The project CLI is installed and reports `2.119.0`, but Docker and `psql` are unavailable in this workspace, so local database startup, migration replay and catalog assertions have not run here. GitHub Actions is the authoritative live PostgreSQL/PostGIS verification path; inspect the latest run for migration, SQL assertion, type-drift and application-check results. Runtime observations from CI have reported PostgreSQL `17.11` and PostGIS extension/library `3.3.7`; use versions printed by an actual run rather than researched or expected values.
 
 ## Application checks
 

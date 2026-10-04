@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-Phase 2 establishes spatial storage and safe map serialization boundaries only. It does **not** load live database rows into the map and does not implement proximity analysis, customer-density scoring, territory polygons, routing or statistical inference. SQL migrations and the integrity script are present but **NOT VERIFIED LOCALLY** because Supabase CLI, Docker and `psql` are unavailable in this workspace.
+Phase 2 establishes spatial storage and safe map serialization boundaries only. It does **not** load live database rows into the map and does not implement proximity analysis, customer-density scoring, territory polygons, routing or statistical inference. The clean database gate runs in GitHub Actions; local migration replay is **NOT VERIFIED HERE** because Docker and `psql` are unavailable in this workspace. Check the latest CI run for actual SQL results.
 
 ## Coordinates
 

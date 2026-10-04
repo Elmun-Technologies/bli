@@ -2,7 +2,7 @@
 
 A modular Web GIS and location-intelligence workspace for commercial site selection, customer coverage and market analysis. The first pilot is Tashkent, Uzbekistan; the application architecture is city- and country-agnostic.
 
-> **Phase 2 schema and verification gate are implemented; local execution is unavailable here.** The app remains a Phase 1 demo using synthetic fixtures. Phase 2 adds ownership/spatial migrations, tenant-integrity constraints, default-deny RLS, generated-type verification and PII-safe map/domain boundaries. There is still no live database/map-data loading, authentication policy, import or analytics path. Do not load real customer data based on this branch alone.
+> **Phase 2 schema and database release gate are implemented; local database execution is unavailable here.** The app remains a Phase 1 demo using synthetic fixtures. Phase 2 adds ownership/spatial migrations, tenant-integrity constraints, default-deny RLS, schema-generated database types and PII-safe map/domain boundaries. There is still no live database/map-data loading, authentication policy, import or analytics path. Do not load real customer data based on this branch alone.
 
 ## Current capabilities
 
@@ -25,7 +25,7 @@ The ordered migrations add:
 
 `analysis_locations` represents deliberately saved candidates. A map click remains transient client state and is not inserted into the database.
 
-**Local database status: NOT VERIFIED.** The project-local Supabase CLI is pinned to `2.119.0`, but Docker and `psql` are unavailable in this workspace. `.github/workflows/database-integrity.yml` is the release gate: it rebuilds a fresh database, replays every migration, runs live PostGIS/ownership/RLS/index assertions, generates and checks database types, and runs the app checks. A green TypeScript build alone does not validate SQL. See [docs/setup.md](docs/setup.md).
+**Local database status: NOT VERIFIED.** The project-local Supabase CLI is pinned to `2.119.0`, but Docker and `psql` are unavailable in this workspace. `.github/workflows/database-integrity.yml` is the release gate: it starts a fresh database, replays every migration, runs live PostGIS/ownership/RLS/index/deletion/distance assertions, generates and checks database types, and runs the app checks. PostgreSQL/PostGIS versions are reported from runtime by CI. A green TypeScript build alone does not validate SQL; check the latest full workflow before deployment or Phase 3. See [docs/setup.md](docs/setup.md).
 
 ## Technology
 
@@ -46,7 +46,7 @@ src/
   lib/
     data/              Synthetic Tashkent fixtures
     domain/            Validated coordinates and domain types
-    database/          Server-side row type mirrors (not yet generated/verified)
+    database/          Generated Supabase row types and server-side aliases
     geo/               Visual circle geometry and tests
     map/               PII-safe GeoJSON adapter and tests
     supabase/          Server-only Supabase client factory
@@ -104,7 +104,7 @@ The map can be previewed without Supabase credentials. Do not add a Supabase ser
 ## Roadmap
 
 1. **Phase 1 — foundation (implemented):** Next.js, Tailwind, MapLibre shell, synthetic Tashkent fixtures, Supabase environment wiring and PostGIS extension setup.
-2. **Phase 2 — ownership/spatial schema and boundaries (implemented in source; database verification pending):** workspace-safe tables, PostGIS geography, constraints/indexes, default-deny RLS, runtime coordinate validation and map DTO allow-list.
+2. **Phase 2 — ownership/spatial schema and boundaries (implemented; release-gated):** workspace-safe tables, PostGIS geography, constraints/indexes, default-deny RLS, generated types, runtime coordinate validation and map DTO allow-list. The current latest clean CI workflow must be green before deployment or Phase 3.
 3. **Phase 3 — authenticated map data (not started):** first define workspace memberships and role-aware RLS/grants; then build server-side data access and safe map feature delivery. Do not load live business data before those security gates.
 4. **Phase 4 — spatial analysis (not started):** product-defined PostGIS radius metrics and location-analysis endpoints.
 5. **Phase 5 — data operations (not started):** validated imports, provenance, privacy/retention controls and customer layers.
