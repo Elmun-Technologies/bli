@@ -49,7 +49,7 @@ jobs:
           sudo apt-get install --yes postgresql-client
           psql --version
 
-      - name: Start local PostgreSQL, reset database, assert schema, and generate types
+      - name: Clean-reset Supabase/PostGIS, seed synthetic demo, run Phase 2/3 assertions, and generate types
         id: verify_database
         run: npm run verify:database
 

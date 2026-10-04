@@ -107,8 +107,8 @@ if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
 fi
 
 run_stage "Start local PostgreSQL through the Supabase CLI" supabase db start
-run_stage "Reset the local database and replay every migration from zero" \
-  supabase db reset --local --no-seed
+run_stage "Reset the local database, replay migrations, and load deterministic synthetic seed data" \
+  supabase db reset --local
 
 CURRENT_STAGE="resolve the local database connection"
 database_url="$(supabase status --output env | awk -F= '
@@ -125,8 +125,10 @@ if [[ -z "$database_url" ]]; then
   exit 2
 fi
 
-run_stage "Verify PostGIS, schema, indexes, ownership, RLS, deletion and distance assertions" \
+run_stage "Verify Phase 2 PostGIS, ownership, RLS, deletion and distance assertions" \
   psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase2_integrity.sql
+run_stage "Verify Phase 3 viewport, radius, workspace isolation, DTO shape and spatial index assertions" \
+  psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase3_spatial_queries.sql
 
 CURRENT_STAGE="generate TypeScript types from the verified local schema"
 mkdir -p src/lib/database
