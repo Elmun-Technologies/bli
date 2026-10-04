@@ -45,6 +45,8 @@ WHERE workspace_id = <demo workspace resolved in SQL>
 
 `ST_DWithin(geography, geography, meters, true)` is used directly instead of `ST_Buffer` + `ST_Intersects`: it expresses the predicate exactly, uses meters rather than degrees, and can use the geography GiST index. The nearest branch uses `extensions.st_distance(spatial_point, candidate, true)` for exact spheroidal ordering, with `branch.id` as a deterministic tiebreaker.
 
+The predicate is inclusive (`distance <= tolerance`), but exact-equality classification is subject to floating-point rounding: `ST_DWithin` evaluates the spheroidal distance on a different code path than `ST_Distance`, so a point whose measured `ST_Distance` equals the tolerance can still be classified marginally outside. Measured against the live seed data, only 6 of 9 branches are classified as inside at their own measured distance, while a ±1 mm band classifies them consistently (`r = d + 1 mm` includes, `r = d - 1 mm` excludes). This is an engine-level numeric property, not an application defect, and it does not matter for real radius analysis — but do not build exact-boundary assertions, deduplication or billing logic on distance equality. `demo_viewport_features` orders by `(feature_kind, feature_id)` before `LIMIT`, so a truncated result set is deterministic across identical requests.
+
 ### Viewport loading — geography `ST_Intersects`
 
 ```sql
