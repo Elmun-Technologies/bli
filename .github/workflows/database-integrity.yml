@@ -1,0 +1,94 @@
+name: Database integrity
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Clean Supabase/PostGIS verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js and npm cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.3
+          cache: npm
+
+      - name: Install the locked Supabase CLI
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Verify Supabase CLI version from lockfile
+        run: |
+          set -Eeuo pipefail
+          expected="$(node -p "require('./package.json').devDependencies.supabase")"
+          actual="$(supabase --version)"
+          printf 'Supabase CLI: %s (package-lock expected %s)\n' "$actual" "$expected"
+          test "$actual" = "$expected"
+
+      - name: Install PostgreSQL client for live catalog assertions
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+          psql --version
+
+      - name: Start local PostgreSQL, reset database, assert schema, and generate types
+        id: verify_database
+        run: npm run verify:database
+
+      - name: Ensure generated database types are checked in and current
+        run: |
+          set -Eeuo pipefail
+          generated_file=src/lib/database/database.types.ts
+          if ! git ls-files --error-unmatch -- "$generated_file" >/dev/null 2>&1; then
+            echo "::error::Generated database types are missing from the repository. Run npm run verify:database and commit $generated_file."
+            exit 1
+          fi
+          if ! git diff --quiet -- "$generated_file"; then
+            echo "::error::Generated database types differ from the freshly migrated schema. Run npm run verify:database and commit the regenerated file."
+            git --no-pager diff -- "$generated_file"
+            exit 1
+          fi
+          echo "Committed database.types.ts matches the clean local schema."
+
+      - name: Upload generated types for database-schema review
+        if: always() && steps.verify_database.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-database-types-${{ github.run_id }}
+          path: src/lib/database/database.types.ts
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Application tests
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build
+
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop --no-backup || true
