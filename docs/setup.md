@@ -97,7 +97,7 @@ Generated Supabase row types are persistence-only. `row-types.ts` now aliases ge
 
 ## Current local verification status
 
-The project CLI is installed and reports `2.119.0`, but Docker and `psql` are unavailable in this workspace, so local database startup, migration replay and catalog assertions have not run here. GitHub Actions is the authoritative live PostgreSQL/PostGIS verification path; inspect the latest run for migration, SQL assertion, type-drift and application-check results. Runtime observations from CI have reported PostgreSQL `17.11` and PostGIS extension/library `3.3.7`; use versions printed by an actual run rather than researched or expected values.
+The project CLI is installed and reports `2.119.0`, but Docker and `psql` are unavailable in this workspace, so local database startup, migration replay and catalog assertions have not run here. GitHub Actions is the authoritative live PostgreSQL/PostGIS verification path and is green for Phase 4: the clean-reset job replayed every migration, ran the Phase 2, Phase 3 and Phase 4 suites, regenerated and checked the database types, and both end-to-end smokes (fixtures and authenticated) passed against the production build. Runtime observations from CI have reported PostgreSQL `17.11` and PostGIS extension/library `3.3.7`; use versions printed by an actual run rather than researched or expected values.
 
 ## Demo data and the workspace boundary
 

@@ -333,6 +333,27 @@ under test are exactly the policies PostgREST applies:
   RPCs, plus PII checks (no customer display names, no workspace B isolation
   rows), and that the demo RPCs stay `service_role`-only.
 
+### Verified results
+
+The Phase 4 commit is verified by a green GitHub Actions run
+(`Database integrity` run 30 on `9123720`) that replayed every migration from
+zero on PostgreSQL 17.11 / PostGIS 3.3.7 and passed:
+
+- `supabase/tests/phase2_integrity.sql` — RLS enabled on all eleven tables, no
+  blanket policy, no `PUBLIC` ACL, `anon` holds nothing, policy/privilege match
+  still intact after the Phase 4 grants;
+- `supabase/tests/phase3_spatial_queries.sql` — the demo spatial RPCs, isolation
+  and index-plan assertions are unchanged and still green;
+- `supabase/tests/phase4_membership_rls.sql` — every per-role, tampering,
+  bootstrap, grant and parity scenario passes as the real `anon`,
+  `authenticated` and `service_role` roles;
+- the fixtures smoke and the authenticated smoke (all 13 scenarios, including
+  workspace-id tampering against a foreign and a non-existent workspace).
+
+The suite has also been run locally on a PGlite PostgreSQL 18.3 / PostGIS 3.6.2
+harness that applies the same migrations against a faithful `auth` schema; it is
+a supplementary harness, not a substitute for the CI database gate.
+
 `scripts/smoke-auth-mode.ts` adds the browser-level path in CI: it starts the
 production build, signs in with the seeded identities through the shipped routes
 and cookies, and checks the selector, the protected page, both tenant GIS

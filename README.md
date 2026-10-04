@@ -51,7 +51,15 @@ The ordered migrations add:
 
 ## Database verification gate
 
-**Local database status: NOT VERIFIED HERE.** The project-local Supabase CLI is pinned to `2.119.0`, but Docker and `psql` are unavailable in this workspace. `.github/workflows/database-integrity.yml` is the release gate: it starts a fresh database, replays every migration from zero, loads `supabase/seed.sql`, runs the live Phase 2 catalog/integrity assertions, the Phase 3 spatial/index assertions and the Phase 4 membership/RLS/grant assertions, generates and checks database types, then runs the app checks including the fixtures smoke and the authenticated end-to-end smoke. **A green TypeScript build alone does not validate SQL.** See [docs/setup.md](docs/setup.md).
+**Local database status: NOT VERIFIED HERE.** The project-local Supabase CLI is pinned to `2.119.0`, but Docker and `psql` are unavailable in this workspace. `.github/workflows/database-integrity.yml` is the release gate, and it is green for the Phase 4 commit:
+
+- it starts the full local Supabase stack (`supabase start` minus studio/mail/realtime/storage/analytics), replays every migration from zero and loads `supabase/seed.sql`;
+- it runs the live Phase 2 catalog/integrity assertions, the Phase 3 spatial/index assertions and the Phase 4 membership/RLS/grant assertions with fail-fast `psql` (PostgreSQL 17.11, PostGIS 3.3.7 in CI);
+- it regenerates `src/lib/database/database.types.ts` and fails on drift;
+- it runs `npm test`, lint, typecheck and the production build;
+- it runs both end-to-end smokes: the fixtures smoke and the authenticated smoke, which signs in through the shipped `/api/auth/sign-in` route and then exercises the protected page, the selector, both tenant GIS endpoints, workspace-id tampering, cross-workspace denial, the still-public demo endpoint and sign-out against the shipped production build.
+
+**A green TypeScript build alone does not validate SQL.** See [docs/setup.md](docs/setup.md).
 
 ## Technology
 
