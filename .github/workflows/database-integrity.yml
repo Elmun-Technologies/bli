@@ -86,22 +86,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # TEMPORARY: surface Phase 3 observed plan timings as a CI annotation.
-      - name: Report Phase 3 spatial plan timings
-        if: always()
-        run: |
-          set -Eeuo pipefail
-          if [ -f "$RUNNER_TEMP/bli-database-verification.log" ]; then
-            summary="$(grep -E 'NOTICE:[[:space:]]+(ST_DWithin|ST_Intersects) plan used|NOTICE:[[:space:]]+Phase 3 spatial assertions passed' \
-              "$RUNNER_TEMP/bli-database-verification.log" \
-              | sed -E 's/^psql:[^:]+:[0-9]+: NOTICE: +//' \
-              | paste -sd ' | ' - || true)"
-            if [ -n "$summary" ]; then
-              printf '::notice title=PHASE3_PLAN_TIMINGS::%s\n' "${summary//'%'/'%25'}"
-            fi
-          fi
-        continue-on-error: true
-
       - name: Application tests
         run: npm test
 
