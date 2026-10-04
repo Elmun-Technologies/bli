@@ -37,6 +37,20 @@ function isMissingDemoWorkspace(error: unknown): boolean {
   );
 }
 
+/**
+ * Missing server credentials are reported as a database failure rather than an
+ * internal error; the thrown error never reaches the client response body.
+ */
+function requireAdminClient() {
+  try {
+    return getAdminSupabaseClient();
+  } catch (error) {
+    throw new SpatialQueryError('Server-side database configuration is unavailable.', {
+      cause: error,
+    });
+  }
+}
+
 async function requireWorkspaceContext(): Promise<DemoWorkspaceContext> {
   const context = await resolveWorkspaceContext();
   if (!context.workspaceId) throw new DemoWorkspaceNotFoundError();
@@ -53,7 +67,7 @@ export async function fetchDemoViewportFeatures(
   kinds: SpatialFeatureKind[] | null,
 ): Promise<ViewportFeatureCollection> {
   await requireWorkspaceContext();
-  const admin = getAdminSupabaseClient();
+  const admin = requireAdminClient();
 
   const { data, error } = await admin.rpc('demo_viewport_features', {
     p_west: bounds.west,
@@ -80,7 +94,7 @@ export async function fetchDemoRadiusAnalysis(
   request: RadiusAnalysisRequest,
 ): Promise<RadiusAnalysisDTO> {
   await requireWorkspaceContext();
-  const admin = getAdminSupabaseClient();
+  const admin = requireAdminClient();
 
   const { data, error } = await admin.rpc('demo_radius_analysis', {
     p_longitude: request.candidate.longitude,

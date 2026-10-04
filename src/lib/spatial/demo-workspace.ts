@@ -32,7 +32,16 @@ export class DemoWorkspaceLookupError extends Error {
  * this narrow context boundary.
  */
 export async function resolveWorkspaceContext(): Promise<DemoWorkspaceContext> {
-  const admin = getAdminSupabaseClient();
+  let admin;
+  try {
+    // Missing elevated credentials are a database availability problem, not an
+    // internal error, and the raw error is never surfaced to clients.
+    admin = getAdminSupabaseClient();
+  } catch (error) {
+    console.error('[spatial:demo-workspace] server database configuration unavailable', error);
+    throw new DemoWorkspaceLookupError();
+  }
+
   const { data: organization, error: organizationError } = await admin
     .from('organizations')
     .select('id, slug')

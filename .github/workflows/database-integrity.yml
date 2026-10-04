@@ -77,15 +77,6 @@ jobs:
           fi
           echo "Committed database.types.ts matches the clean local schema."
 
-      # TEMPORARY (Phase 3): export the regenerated types so they can be
-      # committed when artifact transport is unavailable. Removed right after.
-      - name: Export regenerated database types as a CI annotation
-        if: always() && steps.verify_database.outcome == 'success'
-        run: |
-          set -Eeuo pipefail
-          payload="$(gzip -c src/lib/database/database.types.ts | base64 -w0)"
-          printf '::notice title=REGENERATED_TYPES_B64::%s\n' "$payload"
-
       - name: Upload generated types for database-schema review
         if: always() && steps.verify_database.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

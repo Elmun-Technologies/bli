@@ -207,7 +207,16 @@ isOneToOne: false
             [_ in never]: never
           }
           Functions: {
-            [_ in never]: never
+            "demo_radius_analysis":
+{ Args: { "p_latitude": number,"p_longitude": number,"p_radius_meters": number }; Returns: {
+              "branches_count": number,"category_distribution": Json,"competitors_count": number,"customers_count": number,"customers_revenue_total": string,"locations_count": number,"nearest_branch_distance_meters": number,"nearest_branch_id": string,"nearest_branch_name": string
+            }[]
+                           },
+"demo_viewport_features":
+{ Args: { "p_east": number,"p_kinds"?: (string)[],"p_limit"?: number,"p_north": number,"p_south": number,"p_west": number }; Returns: {
+              "category": string,"display_name": string,"feature_id": string,"kind": string,"latitude": number,"longitude": number
+            }[]
+                           }
           }
           Enums: {
             [_ in never]: never

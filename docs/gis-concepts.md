@@ -1,8 +1,8 @@
-# GIS concepts and Phase 2 spatial decisions
+# GIS concepts and spatial decisions
 
 ## Status and scope
 
-Phase 2 establishes spatial storage and safe map serialization boundaries only. It does **not** load live database rows into the map and does not implement proximity analysis, customer-density scoring, territory polygons, routing or statistical inference. The clean database gate runs in GitHub Actions; local migration replay is **NOT VERIFIED HERE** because Docker and `psql` are unavailable in this workspace. Check the latest CI run for actual SQL results.
+Phase 2 established spatial storage and safe map serialization. Phase 3 adds the first real spatial data flow: viewport feature loading and meter-based radius analysis against PostGIS. It still does not implement scoring, density heatmaps, territory polygons, routing or statistical inference. The clean database gate runs in GitHub Actions; local migration replay is **NOT VERIFIED HERE** because Docker and `psql` are unavailable in this workspace. Check the latest CI run for actual SQL results.
 
 ## Coordinates
 
@@ -26,25 +26,53 @@ Tradeoffs:
 - Geography KNN `<->` orders by spherical distance; use it to shortlist candidates, then refine/reorder with `ST_Distance(a, b, true)` when accurate spheroidal ordering is important.
 - If a future analysis is strictly local and needs a projected planar CRS or complex polygon operations, choose and document an appropriate projected geometry representation as a derived value. Do not silently reinterpret EPSG:4326 values as projected meters.
 
-## Query patterns (future use only)
+## Implemented query patterns (Phase 3)
 
-A meter-radius search should use an index-aware predicate, with the query point made in longitude/latitude order and cast to geography:
+### Radius analysis — `ST_DWithin` is authoritative
 
 ```sql
-SELECT id, category
-FROM public.locations
-WHERE workspace_id = $1
-  AND dataset_id = $2
+-- public.demo_radius_analysis(...) inside the demo workspace only
+SELECT count(*), COALESCE(sum(revenue), 0)::text
+FROM public.customers
+WHERE workspace_id = <demo workspace resolved in SQL>
   AND extensions.st_dwithin(
         spatial_point,
-        extensions.st_setsrid(extensions.st_makepoint($3, $4), 4326)::extensions.geography,
-        $5 -- distance in meters
+        extensions.st_setsrid(extensions.st_makepoint($1, $2), 4326)::extensions.geography,
+        $3,      -- radius in meters
+        true     -- spheroidal distance
       );
 ```
 
-The GiST index returns candidate rows and the predicate filters by the requested distance. Verify real workloads with `EXPLAIN (ANALYZE, BUFFERS)`; an index existing in DDL does not guarantee a specific plan for every table size or query shape.
+`ST_DWithin(geography, geography, meters, true)` is used directly instead of `ST_Buffer` + `ST_Intersects`: it expresses the predicate exactly, uses meters rather than degrees, and can use the geography GiST index. The nearest branch uses `extensions.st_distance(spatial_point, candidate, true)` for exact spheroidal ordering, with `branch.id` as a deterministic tiebreaker.
 
-GeoJSON output should explicitly cast geography to geometry before `ST_AsGeoJSON`, then convert coordinates to the domain/map DTO. The current client fixture adapter is independent of database rows; there is no SQL/API query that loads records into the map.
+### Viewport loading — geography `ST_Intersects`
+
+```sql
+-- public.demo_viewport_features(...) inside the demo workspace only
+SELECT id, category, name,
+       extensions.st_x(spatial_point::extensions.geometry),
+       extensions.st_y(spatial_point::extensions.geometry)
+FROM public.locations
+WHERE extensions.st_intersects(
+        spatial_point,
+        extensions.st_makeenvelope($1, $2, $3, $4, 4326)::extensions.geography
+      )
+LIMIT $5;
+```
+
+The window is built once from validated `west/south/east/north` values. There is no second spatial column and no duplicated latitude/longitude column: X/Y are derived from the authoritative geography by an explicit geometry cast only for output. Ordinary (non-antimeridian) bounding boxes are sufficient for the Tashkent pilot; antimeridian-crossing requests are rejected with a validation error and global support is future work.
+
+### Result caps and request behaviour
+
+- The API requests `cap + 1` rows from the RPC, where the cap is **2,500** features per viewport. The extra row detects truncation rather than silently dropping data, and the response carries `meta.returnedCount`, `meta.limit` and `meta.truncated`.
+- The browser issues one request per `moveend` (not per pixel), aborts the previous request with `AbortController`, and ignores any response whose sequence is no longer current, so a slow older request can never overwrite a newer viewport.
+- Very broad viewports (beyond the server limits) are not requested at all; the UI reports "Zoom in to load the Tashkent demo area".
+
+### Index-plan evidence
+
+The Phase 3 SQL suite runs predicate-only `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` probes with sequential scans disabled *for the probe only* and asserts the matching GiST index appears in the plan for both `ST_DWithin` and `ST_Intersects` on all four point tables, printing the observed plan times. The demo dataset is intentionally tiny, so the planner may legitimately prefer a B-tree/workspace filter or a sequential scan in production-shaped queries; the probe proves the index is *usable* by this query shape without pinning a fragile plan string. Full workload benchmarking with realistic, privacy-safe data is still future work.
+
+GeoJSON is produced from explicit X/Y extraction of the geography's geometry cast rather than `ST_AsGeoJSON` in the RPC, keeping the SQL projection narrow and the DTO construction in one place. The fixture adapter (`DATA_SOURCE=fixtures`) remains display-only and never feeds analysis.
 
 ## Geometry boundary
 
@@ -63,9 +91,11 @@ No polygon schema or query is included in Phase 2.
 - Database geography distances and the UI radius are in **meters**.
 - Coordinates are `[longitude, latitude]` in degrees.
 - GeoJSON points use `[longitude, latitude]` arrays.
-- The demo radius circle remains a client-side illustrative shape and is not a database result or an authoritative territory polygon.
+- The demo radius circle remains a client-side illustrative shape. It reflects the selected radius immediately for orientation, but it is **not** the analytical source of truth: every count, nearest-branch distance and revenue figure comes from the PostGIS RPC.
+- Viewport feature loading, radius analysis and nearest-branch calculation are all server-side. The browser never downloads all branches (or all customers) to compute proximity.
+- Client-side MapLibre clustering over the capped viewport data is intentionally retained. Server-side vector tile clustering (`ST_AsMVT`, PMTiles, tile servers) is explicitly out of scope for Phase 3 and belongs to a later scale phase.
 - `analysis_locations` stores only intentionally persisted project candidates. A map click remains transient React state until an explicit future save workflow exists.
 
 ## Indexes
 
-Every Phase 2 spatial point table declares a GiST index on `spatial_point`. B-tree indexes separately cover workspace/dataset/category/segment/project filters and external-ID uniqueness. The SQL integrity script asserts GiST index presence, but that database assertion has **not been executed locally**. Index usefulness and query plans remain to be benchmarked with realistic, privacy-safe data.
+Every spatial point table declares a GiST index on `spatial_point`, and B-tree indexes separately cover workspace/dataset/category/segment/project filters and external-ID uniqueness. Phase 2 asserts GiST index presence from the catalog; Phase 3 additionally asserts that the actual `ST_DWithin` and `ST_Intersects` predicates used by the RPCs can use those indexes, and prints the observed plan execution times in CI. Index selectivity and latency at production volume still require benchmarking with realistic, privacy-safe data.
