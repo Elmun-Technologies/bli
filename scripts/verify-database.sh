@@ -129,6 +129,8 @@ run_stage "Verify Phase 2 PostGIS, ownership, RLS, deletion and distance asserti
   psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase2_integrity.sql
 run_stage "Verify Phase 3 viewport, radius, workspace isolation, DTO shape and spatial index assertions" \
   psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase3_spatial_queries.sql
+run_stage "Verify Phase 4 auth, workspace membership, RLS, grant and last-owner assertions" \
+  psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase4_membership_rls.sql
 
 CURRENT_STAGE="generate TypeScript types from the verified local schema"
 mkdir -p src/lib/database

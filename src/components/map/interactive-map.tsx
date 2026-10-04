@@ -21,7 +21,11 @@ import type {
   SafeMapFeatureProperties,
   ViewportBounds,
 } from '@/lib/spatial/contracts';
-import { fetchViewportFeatures, SpatialApiError } from '@/lib/spatial/client';
+import {
+  fetchViewportFeatures,
+  fetchWorkspaceViewportFeatures,
+  SpatialApiError,
+} from '@/lib/spatial/client';
 import { MAX_VIEWPORT_LATITUDE_SPAN, MAX_VIEWPORT_LONGITUDE_SPAN } from '@/lib/spatial/validation';
 import type { MapDataStatus, MapViewProps } from '@/components/map/map-types';
 
@@ -104,6 +108,7 @@ export function InteractiveMap({
   radiusMeters,
   focusRequest,
   dataSource,
+  workspaceId,
   onSelectLocation,
   onCreateCandidate,
   onFeaturesLoaded,
@@ -412,11 +417,9 @@ export function InteractiveMap({
       setStatusMessage(null);
 
       try {
-        const collection = await fetchViewportFeatures(
-          bounds,
-          visibleLayers,
-          controller.signal,
-        );
+        const collection = await (workspaceId
+          ? fetchWorkspaceViewportFeatures(workspaceId, bounds, visibleLayers, controller.signal)
+          : fetchViewportFeatures(bounds, visibleLayers, controller.signal));
         if (disposed || sequence !== requestSequence.current) return;
 
         featuresRef.current = collection.features;
@@ -456,7 +459,7 @@ export function InteractiveMap({
       disposed = true;
       map.off('moveend', loadViewport);
     };
-  }, [isMapLoaded, visibleLayers]);
+  }, [isMapLoaded, visibleLayers, workspaceId]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -49,7 +49,7 @@ jobs:
           sudo apt-get install --yes postgresql-client
           psql --version
 
-      - name: Clean-reset Supabase/PostGIS, seed synthetic demo, run Phase 2/3 assertions, and generate types
+      - name: Clean-reset Supabase/PostGIS, seed synthetic demo, run Phase 2/3/4 assertions, and generate types
         id: verify_database
         run: npm run verify:database
 
@@ -100,6 +100,45 @@ jobs:
 
       - name: Fixtures-mode end-to-end smoke (shipped client against shipped routes)
         run: npm run smoke:fixtures
+
+      - name: Export the local Supabase credentials for the authenticated smoke test
+        run: |
+          set -Eeuo pipefail
+          status_file="$RUNNER_TEMP/supabase-status.env"
+          supabase status --output env > "$status_file"
+
+          read_value() {
+            awk -F= -v key="$1" '
+              $1 == key {
+                sub(/^[^=]*=/, "")
+                gsub(/"/, "")
+                print
+                found = 1
+              }
+              END { if (!found) exit 1 }
+            ' "$status_file"
+          }
+
+          api_url="$(read_value API_URL)"
+          anon_key="$(read_value ANON_KEY)"
+          service_key="$(read_value SERVICE_ROLE_KEY || true)"
+          if [[ -z "$service_key" ]]; then
+            service_key="$(read_value SECRET_KEY || true)"
+          fi
+          if [[ -z "$service_key" ]]; then
+            echo '::error::supabase status did not return an elevated key' >&2
+            exit 1
+          fi
+
+          {
+            printf 'SUPABASE_URL=%s\n' "$api_url"
+            printf 'SUPABASE_ANON_KEY=%s\n' "$anon_key"
+            printf 'SUPABASE_SECRET_KEY=%s\n' "$service_key"
+          } >> "$GITHUB_ENV"
+          printf '::notice title=Local Supabase API for the authenticated smoke::%s\n' "$api_url"
+
+      - name: Authenticated end-to-end smoke (session, membership, tenant GIS, demo isolation)
+        run: npm run smoke:auth
 
       - name: Stop local Supabase stack
         if: always()

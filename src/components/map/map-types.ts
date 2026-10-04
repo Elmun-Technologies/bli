@@ -35,6 +35,12 @@ export interface MapViewProps {
   radiusMeters: number;
   focusRequest: MapFocusRequest | null;
   dataSource: DataSourceMode;
+  /**
+   * Set on the authenticated workspace route only. When present the map reads
+   * from `/api/workspaces/{workspaceId}/...`, which re-validates the session and
+   * membership server-side; when absent it uses the fixed public demo path.
+   */
+  workspaceId?: string;
   onSelectLocation: (location: SelectedLocation) => void;
   onCreateCandidate: (coordinates: Coordinates) => void;
   onFeaturesLoaded: (snapshot: MapViewportSnapshot) => void;

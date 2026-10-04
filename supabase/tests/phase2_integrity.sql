@@ -168,11 +168,16 @@ BEGIN
     RAISE NOTICE 'Verified spatial index definition: %', index_definition;
   END LOOP;
 
-  -- Every tenant-owned table is RLS-enabled and has no policy yet. Client
-  -- roles also have no table privileges until authenticated policies arrive.
+  -- Every tenant-owned table is RLS-enabled, and the client posture is checked
+  -- in its Phase 4 shape: policies exist only for `authenticated`, none of them
+  -- is a blanket grant, anon holds no privilege at all, `authenticated` holds no
+  -- DDL-style privilege, and every privilege it does hold is backed by a policy.
+  -- The per-table privilege matrix itself is asserted in
+  -- supabase/tests/phase4_membership_rls.sql.
   FOREACH table_name IN ARRAY ARRAY[
-    'organizations', 'workspaces', 'projects', 'datasets', 'project_datasets',
-    'locations', 'customers', 'competitors', 'branches', 'analysis_locations'
+    'organizations', 'workspaces', 'workspace_members', 'projects', 'datasets',
+    'project_datasets', 'locations', 'customers', 'competitors', 'branches',
+    'analysis_locations'
   ] LOOP
     SELECT relation.relrowsecurity
       INTO rls_enabled
@@ -194,8 +199,32 @@ BEGIN
         ON namespace.oid = relation.relnamespace
      WHERE namespace.nspname = 'public'
        AND relation.relname = table_name;
-    IF policy_count <> 0 THEN
-      RAISE EXCEPTION 'Phase 2 should not create policies on public.%', table_name;
+    IF policy_count = 0 THEN
+      RAISE EXCEPTION 'public.% has no policy, so no authenticated client can reach it', table_name;
+    END IF;
+
+    -- Every policy must be scoped to `authenticated` only, and none may be a
+    -- blanket grant: `USING (true)` / `WITH CHECK (true)` or a policy with no
+    -- expression at all would hand the whole table to any signed-in user.
+    IF EXISTS (
+      SELECT 1
+        FROM pg_catalog.pg_policy AS policy
+        JOIN pg_catalog.pg_class AS relation
+          ON relation.oid = policy.polrelid
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = relation.relnamespace
+       WHERE namespace.nspname = 'public'
+         AND relation.relname = table_name
+         AND (
+           policy.polroles <> ARRAY[
+             (SELECT role.oid FROM pg_catalog.pg_roles AS role WHERE role.rolname = 'authenticated')
+           ]::oid[]
+           OR (policy.polqual IS NULL AND policy.polwithcheck IS NULL)
+           OR pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
+           OR pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) = 'true'
+         )
+    ) THEN
+      RAISE EXCEPTION 'public.% has a policy that is not narrowly scoped to authenticated', table_name;
     END IF;
 
     IF EXISTS (
@@ -213,7 +242,8 @@ BEGIN
       RAISE EXCEPTION 'PUBLIC has an unintended table privilege on public.%', table_name;
     END IF;
 
-    FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    -- anon stays blocked at the privilege layer, before RLS is consulted.
+    FOREACH role_name IN ARRAY ARRAY['anon'] LOOP
       FOREACH privilege_name IN ARRAY ARRAY[
         'SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
       ] LOOP
@@ -227,8 +257,48 @@ BEGIN
         END IF;
       END LOOP;
     END LOOP;
+
+    -- authenticated never receives TRUNCATE (which RLS does not filter),
+    -- REFERENCES or TRIGGER, no matter what the platform's ALTER DEFAULT
+    -- PRIVILEGES granted when the table was created.
+    FOREACH privilege_name IN ARRAY ARRAY['TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF pg_catalog.has_table_privilege(
+        'authenticated',
+        'public.' || table_name,
+        privilege_name
+      ) THEN
+        RAISE EXCEPTION 'authenticated unexpectedly has % on public.%',
+          privilege_name, table_name;
+      END IF;
+    END LOOP;
+
+    -- Every policy must have the matching table privilege, otherwise the policy
+    -- can never take effect. `polcmd` is r=SELECT, a=INSERT, w=UPDATE, d=DELETE.
+    IF EXISTS (
+      SELECT 1
+        FROM pg_catalog.pg_policy AS policy
+        JOIN pg_catalog.pg_class AS relation
+          ON relation.oid = policy.polrelid
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = relation.relnamespace
+       WHERE namespace.nspname = 'public'
+         AND relation.relname = table_name
+         AND (
+           (policy.polcmd = 'r' AND NOT pg_catalog.has_table_privilege('authenticated', 'public.' || table_name, 'SELECT'))
+           OR (policy.polcmd = 'a' AND NOT pg_catalog.has_table_privilege('authenticated', 'public.' || table_name, 'INSERT'))
+           OR (policy.polcmd = 'w' AND NOT pg_catalog.has_table_privilege('authenticated', 'public.' || table_name, 'UPDATE'))
+           OR (policy.polcmd = 'd' AND NOT pg_catalog.has_table_privilege('authenticated', 'public.' || table_name, 'DELETE'))
+           OR (policy.polcmd = '*'
+               AND (NOT pg_catalog.has_table_privilege('authenticated', 'public.' || table_name, 'SELECT')
+                 OR NOT pg_catalog.has_table_privilege('authenticated', 'public.' || table_name, 'INSERT')
+                 OR NOT pg_catalog.has_table_privilege('authenticated', 'public.' || table_name, 'UPDATE')
+                 OR NOT pg_catalog.has_table_privilege('authenticated', 'public.' || table_name, 'DELETE')))
+         )
+    ) THEN
+      RAISE EXCEPTION 'public.% has a policy without its matching authenticated privilege', table_name;
+    END IF;
   END LOOP;
-  RAISE NOTICE 'RLS enabled, no policies present, PUBLIC/anon/authenticated table privileges absent';
+  RAISE NOTICE 'RLS enabled everywhere, policies exist only for authenticated, no blanket policy, anon has zero privileges, authenticated has no TRUNCATE/REFERENCES/TRIGGER';
 
   -- Build two tenants and valid same-workspace rows.
   INSERT INTO public.organizations (name, slug)

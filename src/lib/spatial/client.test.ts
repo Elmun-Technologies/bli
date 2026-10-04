@@ -5,6 +5,8 @@ import {
   buildViewportSearchParams,
   fetchViewportFeatures,
   requestRadiusAnalysis,
+  workspaceRadiusEndpoint,
+  workspaceViewportEndpoint,
   SpatialApiError,
 } from './client';
 import { toRadiusAnalysisDTO, toViewportFeatureCollection } from './dto';
@@ -170,4 +172,23 @@ test('radius adapter propagates cancellation', async (t) => {
       ),
     (error: unknown) => error instanceof DOMException && error.name === 'AbortError',
   );
+});
+
+test('tenant endpoints carry the workspace id and reuse the demo query contract', () => {
+  const viewport = workspaceViewportEndpoint('00000000-0000-4000-8000-000000000010', BOUNDS, [
+    'customers',
+  ]);
+  assert.match(viewport, /^\/api\/workspaces\/00000000-0000-4000-8000-000000000010\/map\/features\?/);
+  assert.match(viewport, /kinds=customers/);
+
+  assert.equal(
+    workspaceRadiusEndpoint('00000000-0000-4000-8000-000000000010'),
+    '/api/workspaces/00000000-0000-4000-8000-000000000010/analysis/radius',
+  );
+});
+
+test('a workspace id in the path is URL-encoded, never interpolated raw', () => {
+  const endpoint = workspaceViewportEndpoint('../../etc/passwd', BOUNDS, null);
+  assert.equal(endpoint.includes('..%2F..%2Fetc%2Fpasswd'), true);
+  assert.equal(endpoint.includes('/../../'), false);
 });

@@ -179,3 +179,85 @@ INSERT INTO public.customers
 VALUES
   ('50000000-0000-4000-8000-000000000004', '00000000-0000-4000-8000-000000000011', '00000000-0000-4000-8000-000000000037', 'isolation-customer-001', NULL, NULL, NULL, NULL, extensions.st_setsrid(extensions.st_makepoint(69.2797, 41.3111), 4326)::extensions.geography, 999.99, 1, 'test-only', 'synthetic-seed', '{"synthetic": true, "test_only": true, "no_contact_fields": true}'::jsonb)
 ON CONFLICT (id) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
+-- Phase 4 deterministic identities (local development and clean-DB CI only)
+-- ---------------------------------------------------------------------------
+-- These are synthetic Supabase Auth users that exist so workspace membership and
+-- membership-aware RLS can be exercised end to end. They are NOT production
+-- identities and must never be seeded into a deployed project; the operator path
+-- for real environments is public.bootstrap_workspace_owner(), documented in
+-- docs/auth-security.md.
+--
+-- Role coverage:
+--   owner-a@example.test    owner   of workspace tashkent-demo (workspace A)
+--   admin-a@example.test    admin   of workspace A
+--   analyst-a@example.test  analyst of workspace A
+--   viewer-a@example.test   viewer  of workspace A
+--   owner-b@example.test    owner   of workspace isolation-test (workspace B)
+--   outsider@example.test   no membership anywhere
+--   operator@example.test  no membership; actor for the server/operator bootstrap test only
+DO $phase4_seed_preflight$
+BEGIN
+  IF pg_catalog.to_regprocedure('extensions.crypt(text,text)') IS NULL THEN
+    RAISE EXCEPTION 'pgcrypto must be installed in the extensions schema to seed deterministic auth users';
+  END IF;
+  IF pg_catalog.to_regclass('auth.users') IS NULL THEN
+    RAISE EXCEPTION 'auth.users is required to seed deterministic auth users';
+  END IF;
+END;
+$phase4_seed_preflight$;
+
+INSERT INTO auth.users (
+  instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+  raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+  confirmation_token, email_change, email_change_token_new, recovery_token
+)
+VALUES
+  ('00000000-0000-0000-0000-000000000000', 'a1000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'owner-a@example.test', extensions.crypt('phase4-demo-password', extensions.gen_salt('bf')), pg_catalog.now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"synthetic":true,"display_name":"Synthetic Owner A"}'::jsonb, pg_catalog.now(), pg_catalog.now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000', 'a1000000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'admin-a@example.test', extensions.crypt('phase4-demo-password', extensions.gen_salt('bf')), pg_catalog.now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"synthetic":true,"display_name":"Synthetic Admin A"}'::jsonb, pg_catalog.now(), pg_catalog.now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000', 'a1000000-0000-4000-8000-000000000003', 'authenticated', 'authenticated', 'analyst-a@example.test', extensions.crypt('phase4-demo-password', extensions.gen_salt('bf')), pg_catalog.now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"synthetic":true,"display_name":"Synthetic Analyst A"}'::jsonb, pg_catalog.now(), pg_catalog.now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000', 'a1000000-0000-4000-8000-000000000004', 'authenticated', 'authenticated', 'viewer-a@example.test', extensions.crypt('phase4-demo-password', extensions.gen_salt('bf')), pg_catalog.now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"synthetic":true,"display_name":"Synthetic Viewer A"}'::jsonb, pg_catalog.now(), pg_catalog.now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000', 'b1000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'owner-b@example.test', extensions.crypt('phase4-demo-password', extensions.gen_salt('bf')), pg_catalog.now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"synthetic":true,"display_name":"Synthetic Owner B"}'::jsonb, pg_catalog.now(), pg_catalog.now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000', 'd1000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'operator@example.test', extensions.crypt('phase4-demo-password', extensions.gen_salt('bf')), pg_catalog.now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"synthetic":true,"display_name":"Synthetic Bootstrap Operator"}'::jsonb, pg_catalog.now(), pg_catalog.now(), '', '', '', ''),
+  ('00000000-0000-0000-0000-000000000000', 'c1000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'outsider@example.test', extensions.crypt('phase4-demo-password', extensions.gen_salt('bf')), pg_catalog.now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"synthetic":true,"display_name":"Synthetic Outsider"}'::jsonb, pg_catalog.now(), pg_catalog.now(), '', '', '', '')
+ON CONFLICT (id) DO NOTHING;
+
+-- GoTrue requires a matching email identity row for password sign-in. The
+-- NOT EXISTS guard avoids depending on a specific unique-constraint name.
+INSERT INTO auth.identities (
+  id, provider_id, user_id, identity_data, provider, last_sign_in_at, created_at, updated_at
+)
+SELECT pg_catalog.gen_random_uuid(),
+       seeded_user.id::text,
+       seeded_user.id,
+       pg_catalog.jsonb_build_object('sub', seeded_user.id::text, 'email', seeded_user.email),
+       'email',
+       pg_catalog.now(),
+       pg_catalog.now(),
+       pg_catalog.now()
+  FROM auth.users AS seeded_user
+ WHERE seeded_user.id IN (
+         'a1000000-0000-4000-8000-000000000001',
+         'a1000000-0000-4000-8000-000000000002',
+         'a1000000-0000-4000-8000-000000000003',
+         'a1000000-0000-4000-8000-000000000004',
+         'b1000000-0000-4000-8000-000000000001',
+         'c1000000-0000-4000-8000-000000000001',
+         'd1000000-0000-4000-8000-000000000001'
+       )
+   AND NOT EXISTS (
+         SELECT 1
+           FROM auth.identities AS existing_identity
+          WHERE existing_identity.provider = 'email'
+            AND existing_identity.provider_id = seeded_user.id::text
+       );
+
+INSERT INTO public.workspace_members (workspace_id, user_id, role)
+VALUES
+  ('00000000-0000-4000-8000-000000000010', 'a1000000-0000-4000-8000-000000000001', 'owner'),
+  ('00000000-0000-4000-8000-000000000010', 'a1000000-0000-4000-8000-000000000002', 'admin'),
+  ('00000000-0000-4000-8000-000000000010', 'a1000000-0000-4000-8000-000000000003', 'analyst'),
+  ('00000000-0000-4000-8000-000000000010', 'a1000000-0000-4000-8000-000000000004', 'viewer'),
+  ('00000000-0000-4000-8000-000000000011', 'b1000000-0000-4000-8000-000000000001', 'owner')
+ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role;

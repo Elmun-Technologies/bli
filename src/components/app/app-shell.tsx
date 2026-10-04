@@ -28,7 +28,11 @@ import {
   type SelectedLocation,
 } from '@/lib/domain/map-location';
 import { analysisKey, toAnalysisPanelView } from '@/lib/spatial/analysis-view';
-import { requestRadiusAnalysis, SpatialApiError } from '@/lib/spatial/client';
+import {
+  requestRadiusAnalysis,
+  requestWorkspaceRadiusAnalysis,
+  SpatialApiError,
+} from '@/lib/spatial/client';
 import type { DataSourceMode } from '@/lib/spatial/data-source';
 
 const INITIAL_MAP_DATA_STATE: MapDataState = {
@@ -46,7 +50,14 @@ const EMPTY_LAYER_COUNTS: Record<MapLayerId, number> = {
   places: 0,
 };
 
-export function AppShell({ dataSource }: { dataSource: DataSourceMode }) {
+export function AppShell({
+  dataSource,
+  workspaceId,
+}: {
+  dataSource: DataSourceMode;
+  /** Present only on the authenticated tenant route; absent for the public demo. */
+  workspaceId?: string;
+}) {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('Map');
   const [visibleLayers, setVisibleLayers] = useState<MapLayerId[]>([...MAP_LAYER_IDS]);
   const [selectedLocation, setSelectedLocation] = useState<SelectedLocation>(
@@ -118,16 +129,17 @@ export function AppShell({ dataSource }: { dataSource: DataSourceMode }) {
       stale: false,
     }));
 
-    void requestRadiusAnalysis(
-      {
-        candidate: {
-          longitude: selectedLocation.coordinates[0],
-          latitude: selectedLocation.coordinates[1],
-        },
-        radiusMeters,
+    const analysisRequest = {
+      candidate: {
+        longitude: selectedLocation.coordinates[0],
+        latitude: selectedLocation.coordinates[1],
       },
-      controller.signal,
-    )
+      radiusMeters,
+    };
+
+    void (workspaceId
+      ? requestWorkspaceRadiusAnalysis(workspaceId, analysisRequest, controller.signal)
+      : requestRadiusAnalysis(analysisRequest, controller.signal))
       .then((result) => {
         if (controller.signal.aborted) return;
         setAnalysis({
@@ -153,7 +165,7 @@ export function AppShell({ dataSource }: { dataSource: DataSourceMode }) {
           stale: false,
         });
       });
-  }, [radiusMeters, selectedLocation.coordinates]);
+  }, [radiusMeters, selectedLocation.coordinates, workspaceId]);
 
   // Results stay visible but are explicitly marked stale until the candidate
   // and radius match a completed server analysis.
@@ -215,6 +227,7 @@ export function AppShell({ dataSource }: { dataSource: DataSourceMode }) {
                 radiusMeters={radiusMeters}
                 selectedLocation={selectedLocation}
                 visibleLayers={visibleLayers}
+                workspaceId={workspaceId}
               />
               <div className="map-place-badge">
                 <span aria-hidden="true" className="map-place-badge__icon">

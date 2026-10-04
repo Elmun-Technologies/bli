@@ -182,6 +182,25 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"workspace_members": {
+                  Row: {
+                    "created_at": string,"id": string,"role": Database["public"]['Enums']["workspace_member_role"],"updated_at": string,"user_id": string,"workspace_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"id"?: string,"role": Database["public"]['Enums']["workspace_member_role"],"updated_at"?: string,"user_id": string,"workspace_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"id"?: string,"role"?: Database["public"]['Enums']["workspace_member_role"],"updated_at"?: string,"user_id"?: string,"workspace_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "workspace_members_workspace_fk"
+      columns: ["workspace_id"]
+isOneToOne: false
+      referencedRelation: "workspaces"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"workspaces": {
                   Row: {
                     "created_at": string,"id": string,"metadata": NonNullable<Json>,"name": string,"organization_id": string,"slug": string,"updated_at": string
@@ -207,7 +226,12 @@ isOneToOne: false
             [_ in never]: never
           }
           Functions: {
-            "demo_radius_analysis":
+            "bootstrap_workspace_owner":
+{ Args: { "p_organization_name": string,"p_organization_slug": string,"p_owner_user_id": string,"p_workspace_name": string,"p_workspace_slug": string }; Returns: {
+              "created_workspace": boolean,"membership_id": string,"organization_id": string,"workspace_id": string
+            }[]
+                           },
+"demo_radius_analysis":
 { Args: { "p_latitude": number,"p_longitude": number,"p_radius_meters": number }; Returns: {
               "branches_count": number,"category_distribution": Json,"competitors_count": number,"customers_count": number,"customers_revenue_total": string,"locations_count": number,"nearest_branch_distance_meters": number,"nearest_branch_id": string,"nearest_branch_name": string
             }[]
@@ -216,10 +240,32 @@ isOneToOne: false
 { Args: { "p_east": number,"p_kinds"?: (string)[],"p_limit"?: number,"p_north": number,"p_south": number,"p_west": number }; Returns: {
               "category": string,"display_name": string,"feature_id": string,"kind": string,"latitude": number,"longitude": number
             }[]
+                           },
+"grant_workspace_owner":
+{ Args: { "p_user_id": string,"p_workspace_id": string }; Returns: string
+                           },
+"has_workspace_role":
+{ Args: { "p_allowed_roles": (Database["public"]['Enums']["workspace_member_role"])[],"p_workspace_id": string }; Returns: boolean
+                           },
+"is_workspace_member":
+{ Args: { "p_workspace_id": string }; Returns: boolean
+                           },
+"workspace_radius_analysis":
+{ Args: { "p_latitude": number,"p_longitude": number,"p_radius_meters": number,"p_workspace_id": string }; Returns: {
+              "branches_count": number,"category_distribution": Json,"competitors_count": number,"customers_count": number,"customers_revenue_total": string,"locations_count": number,"nearest_branch_distance_meters": number,"nearest_branch_id": string,"nearest_branch_name": string
+            }[]
+                           },
+"workspace_role":
+{ Args: { "p_workspace_id": string }; Returns: Database["public"]['Enums']["workspace_member_role"]
+                           },
+"workspace_viewport_features":
+{ Args: { "p_east": number,"p_kinds"?: (string)[],"p_limit"?: number,"p_north": number,"p_south": number,"p_west": number,"p_workspace_id": string }; Returns: {
+              "category": string,"display_name": string,"feature_id": string,"kind": string,"latitude": number,"longitude": number
+            }[]
                            }
           }
           Enums: {
-            [_ in never]: never
+            "workspace_member_role": "owner"|"admin"|"analyst"|"viewer"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -335,7 +381,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            
+            "workspace_member_role": ["owner", "admin", "analyst", "viewer"]
           }
         }
 } as const

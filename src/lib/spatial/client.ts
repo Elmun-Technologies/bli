@@ -68,16 +68,74 @@ export function buildViewportSearchParams(
   return params.toString();
 }
 
+/**
+ * Endpoint builders. The demo endpoints are the fixed public synthetic path;
+ * the tenant endpoints carry the workspace id that the server re-validates
+ * against the caller's memberships on every request.
+ */
+export function demoViewportEndpoint(bounds: ViewportBounds, kinds: SpatialFeatureKind[] | null): string {
+  return `/api/demo/map/features?${buildViewportSearchParams(bounds, kinds)}`;
+}
+
+export function workspaceViewportEndpoint(
+  workspaceId: string,
+  bounds: ViewportBounds,
+  kinds: SpatialFeatureKind[] | null,
+): string {
+  return `/api/workspaces/${encodeURIComponent(workspaceId)}/map/features?${buildViewportSearchParams(bounds, kinds)}`;
+}
+
+export function demoRadiusEndpoint(): string {
+  return '/api/demo/analysis/radius';
+}
+
+export function workspaceRadiusEndpoint(workspaceId: string): string {
+  return `/api/workspaces/${encodeURIComponent(workspaceId)}/analysis/radius`;
+}
+
 /** Fetch viewport features for the demo map. Callers own cancellation. */
 export async function fetchViewportFeatures(
   bounds: ViewportBounds,
   kinds: SpatialFeatureKind[] | null,
   signal?: AbortSignal,
 ): Promise<ViewportFeatureCollection> {
-  const response = await fetch(
-    `/api/demo/map/features?${buildViewportSearchParams(bounds, kinds)}`,
-    { signal, cache: 'no-store' },
-  );
+  const response = await fetch(demoViewportEndpoint(bounds, kinds), {
+    signal,
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    let code = 'request_failed';
+    try {
+      code = readErrorCode(await response.clone().json());
+    } catch {
+      // Keep the generic code.
+    }
+    throw new SpatialApiError(
+      await readErrorMessage(response, 'Map features could not be loaded.'),
+      response.status,
+      code,
+    );
+  }
+
+  return parseViewportFeatureCollection(await response.json());
+}
+
+/**
+ * Viewport features for one workspace the caller is a member of. The browser
+ * supplies the workspace id only as a routing hint; the route handler
+ * re-validates the session and membership before any spatial query runs.
+ */
+export async function fetchWorkspaceViewportFeatures(
+  workspaceId: string,
+  bounds: ViewportBounds,
+  kinds: SpatialFeatureKind[] | null,
+  signal?: AbortSignal,
+): Promise<ViewportFeatureCollection> {
+  const response = await fetch(workspaceViewportEndpoint(workspaceId, bounds, kinds), {
+    signal,
+    cache: 'no-store',
+  });
 
   if (!response.ok) {
     let code = 'request_failed';
@@ -101,7 +159,7 @@ export async function requestRadiusAnalysis(
   request: RadiusAnalysisRequest,
   signal?: AbortSignal,
 ): Promise<RadiusAnalysisDTO> {
-  const response = await fetch('/api/demo/analysis/radius', {
+  const response = await fetch(demoRadiusEndpoint(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
@@ -125,3 +183,35 @@ export async function requestRadiusAnalysis(
 
   return parseRadiusAnalysisResponse(await response.json());
 }
+
+/** Radius aggregates for one workspace the caller is a member of. */
+export async function requestWorkspaceRadiusAnalysis(
+  workspaceId: string,
+  request: RadiusAnalysisRequest,
+  signal?: AbortSignal,
+): Promise<RadiusAnalysisDTO> {
+  const response = await fetch(workspaceRadiusEndpoint(workspaceId), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal,
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    let code = 'request_failed';
+    try {
+      code = readErrorCode(await response.clone().json());
+    } catch {
+      // Keep the generic code.
+    }
+    throw new SpatialApiError(
+      await readErrorMessage(response, 'Radius analysis could not be completed.'),
+      response.status,
+      code,
+    );
+  }
+
+  return parseRadiusAnalysisResponse(await response.json());
+}
+
