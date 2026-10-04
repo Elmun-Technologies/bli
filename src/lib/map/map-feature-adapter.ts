@@ -5,21 +5,16 @@ import type {
   MapFeatureProperties,
   MapLocationFeatureInput,
 } from '@/lib/domain/map-location';
+import { isAllowedMapFeatureId } from '@/lib/spatial/feature-id';
 
 export type MapPointFeature = Feature<Point, MapFeatureProperties>;
 export type MapPointFeatureCollection = FeatureCollection<Point, MapFeatureProperties>;
 
-const DATABASE_UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
-const DEMO_FIXTURE_ID_PATTERN = /^(?:customer|competitor|branch|place)-\d{2}$/;
-const TRANSIENT_CANDIDATE_ID_PATTERN = /^candidate-site-\d+$/;
-
 function validateMapFeatureId(value: string): string {
-  if (
-    !DATABASE_UUID_PATTERN.test(value) &&
-    !DEMO_FIXTURE_ID_PATTERN.test(value) &&
-    !TRANSIENT_CANDIDATE_ID_PATTERN.test(value)
-  ) {
-    throw new TypeError('Map feature IDs must be opaque database UUIDs or known synthetic fixture IDs.');
+  if (!isAllowedMapFeatureId(value)) {
+    throw new TypeError(
+      'Map feature IDs must be opaque database UUIDs or known synthetic fixture IDs.',
+    );
   }
 
   return value;

@@ -3,15 +3,23 @@
 import { useState } from 'react';
 import { Check, ChevronDown, Layers3 } from 'lucide-react';
 
-import { DEMO_LOCATIONS, MAP_LAYERS } from '@/lib/data/demo-locations';
+import { MAP_LAYERS } from '@/lib/data/demo-locations';
 import type { MapLayerId } from '@/lib/domain/map-location';
+import type { DataSourceMode } from '@/lib/spatial/data-source';
 
 interface MapLayerControlProps {
   visibleLayers: MapLayerId[];
+  layerCounts: Record<MapLayerId, number>;
+  dataSource: DataSourceMode;
   onToggleLayer: (layer: MapLayerId) => void;
 }
 
-export function MapLayerControl({ visibleLayers, onToggleLayer }: MapLayerControlProps) {
+export function MapLayerControl({
+  visibleLayers,
+  layerCounts,
+  dataSource,
+  onToggleLayer,
+}: MapLayerControlProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -33,11 +41,11 @@ export function MapLayerControl({ visibleLayers, onToggleLayer }: MapLayerContro
         <div className="map-layer-menu" role="group" aria-label="Visible map layers">
           <div className="map-layer-menu__header">
             <span>Visible layers</span>
-            <span>DEMO FIXTURES</span>
+            <span>{dataSource === 'database' ? 'POSTGIS VIEWPORT' : 'DEMO FIXTURES'}</span>
           </div>
           {MAP_LAYERS.map((layer) => {
             const isVisible = visibleLayers.includes(layer.id);
-            const count = DEMO_LOCATIONS.filter((location) => location.kind === layer.id).length;
+            const count = layerCounts[layer.id] ?? 0;
 
             return (
               <button
@@ -63,7 +71,11 @@ export function MapLayerControl({ visibleLayers, onToggleLayer }: MapLayerContro
               </button>
             );
           })}
-          <p className="map-layer-menu__note">All locations shown here are synthetic pilot data.</p>
+          <p className="map-layer-menu__note">
+            {dataSource === 'database'
+              ? 'Counts cover the loaded viewport only; the server caps results per request.'
+              : 'Fixture preview mode: display-only data, no PostGIS analysis.'}
+          </p>
         </div>
       ) : null}
     </div>

@@ -10,11 +10,12 @@ import {
   X,
 } from 'lucide-react';
 
-import { DEMO_LOCATIONS, type DemoLocation } from '@/lib/data/demo-locations';
+import { type DemoLocation } from '@/lib/data/demo-locations';
 import type { SelectedLocation } from '@/lib/domain/map-location';
 
 interface TopBarProps {
   onSelectLocation: (location: SelectedLocation) => void;
+  searchLocations: DemoLocation[];
 }
 
 function iconForLocation(location: DemoLocation) {
@@ -23,7 +24,7 @@ function iconForLocation(location: DemoLocation) {
   return MapPin;
 }
 
-export function TopBar({ onSelectLocation }: TopBarProps) {
+export function TopBar({ onSelectLocation, searchLocations }: TopBarProps) {
   const [query, setQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
@@ -32,13 +33,13 @@ export function TopBar({ onSelectLocation }: TopBarProps) {
 
     if (!normalizedQuery) return [];
 
-    return DEMO_LOCATIONS.filter((location) =>
+    return searchLocations.filter((location) =>
       [location.name, location.category, location.address, location.kind]
         .join(' ')
         .toLocaleLowerCase()
         .includes(normalizedQuery),
     );
-  }, [query]);
+  }, [query, searchLocations]);
 
   const visibleResults = results.slice(0, 6);
 
@@ -105,7 +106,7 @@ export function TopBar({ onSelectLocation }: TopBarProps) {
             {results.length ? (
               <>
                 <p className="search-results__label">
-                  PILOT DATA · {results.length > visibleResults.length
+                  SYNTHETIC DEMO DATA · {results.length > visibleResults.length
                     ? `TOP ${visibleResults.length} OF ${results.length}`
                     : results.length} RESULTS
                 </p>
@@ -141,8 +142,8 @@ export function TopBar({ onSelectLocation }: TopBarProps) {
               </>
             ) : (
               <div className="search-empty">
-                <span className="search-empty__title">No pilot data matches “{query}”</span>
-                <span className="search-empty__detail">Search a sample place, category or district.</span>
+                <span className="search-empty__title">No demo data matches “{query}”</span>
+                <span className="search-empty__detail">Search a loaded business, category or district. Move the map to load more.</span>
               </div>
             )}
           </div>

@@ -248,8 +248,10 @@ BEGIN
   END IF;
 
   -- The dataset is intentionally small. Disabling sequential scans only for
-  -- these probes tests that the real geography predicates can use GiST; it is
-  -- not a production-plan assertion or a hardcoded full-plan comparison.
+  -- these predicate-only probes verifies that the geography operators used by
+  -- the RPCs can use GiST. The workspace filter may make a sequential/tenant
+  -- index cheaper at this demo scale; this is not a production-plan assertion
+  -- or a hardcoded full-plan comparison.
   PERFORM pg_catalog.set_config('enable_seqscan', 'off', true);
   FOR probe IN
     SELECT * FROM (VALUES
@@ -261,10 +263,10 @@ BEGIN
   LOOP
     spatial_index_name := probe.index_name;
     plan_query := pg_catalog.format(
-      'EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT entity.id FROM public.%I AS entity WHERE entity.workspace_id = $1 AND extensions.st_dwithin(entity.spatial_point, $2::extensions.geography, 1000, true)',
+      'EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT entity.id FROM public.%I AS entity WHERE extensions.st_dwithin(entity.spatial_point, $1::extensions.geography, 1000, true)',
       probe.table_name
     );
-    EXECUTE plan_query INTO plan_json USING demo_workspace_id, candidate;
+    EXECUTE plan_query INTO plan_json USING candidate;
     IF plan_json::text NOT LIKE '%' || spatial_index_name || '%' THEN
       RAISE EXCEPTION 'GiST index % was not available to a representative ST_DWithin query on %', spatial_index_name, probe.table_name;
     END IF;
@@ -273,10 +275,10 @@ BEGIN
       plan_json -> 0 -> 'Plan' ->> 'Actual Total Time';
 
     plan_query := pg_catalog.format(
-      'EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT entity.id FROM public.%I AS entity WHERE entity.workspace_id = $1 AND extensions.st_intersects(entity.spatial_point, $2::extensions.geography)',
+      'EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT entity.id FROM public.%I AS entity WHERE extensions.st_intersects(entity.spatial_point, $1::extensions.geography)',
       probe.table_name
     );
-    EXECUTE plan_query INTO plan_json USING demo_workspace_id, viewport;
+    EXECUTE plan_query INTO plan_json USING viewport;
     IF plan_json::text NOT LIKE '%' || spatial_index_name || '%' THEN
       RAISE EXCEPTION 'GiST index % was not available to a representative ST_Intersects viewport query on %', spatial_index_name, probe.table_name;
     END IF;

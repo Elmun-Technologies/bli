@@ -1,9 +1,32 @@
 import type { Coordinates } from '@/lib/domain/coordinates';
 import type { MapLayerId, SelectedLocation } from '@/lib/domain/map-location';
+import type { DataSourceMode } from '@/lib/spatial/data-source';
+import type { SafeMapFeature, ViewportFeatureMetadata } from '@/lib/spatial/contracts';
 
 export interface MapFocusRequest {
   id: number;
   location: SelectedLocation;
+}
+
+export type MapDataStatus =
+  | 'loading'
+  | 'refreshing'
+  | 'ready'
+  | 'empty'
+  | 'too-broad'
+  | 'error';
+
+export interface MapDataState {
+  status: MapDataStatus;
+  dataSource: DataSourceMode;
+  featureCount: number;
+  truncated: boolean;
+  message: string | null;
+}
+
+export interface MapViewportSnapshot {
+  features: SafeMapFeature[];
+  meta: ViewportFeatureMetadata;
 }
 
 export interface MapViewProps {
@@ -11,6 +34,9 @@ export interface MapViewProps {
   selectedLocation: SelectedLocation;
   radiusMeters: number;
   focusRequest: MapFocusRequest | null;
+  dataSource: DataSourceMode;
   onSelectLocation: (location: SelectedLocation) => void;
   onCreateCandidate: (coordinates: Coordinates) => void;
+  onFeaturesLoaded: (snapshot: MapViewportSnapshot) => void;
+  onDataStateChange: (state: MapDataState) => void;
 }
