@@ -106,9 +106,23 @@ if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
     "$actual_cli_version" "$psql_client_version"
 fi
 
-run_stage "Start local PostgreSQL through the Supabase CLI" supabase db start
+# The full local stack (PostgreSQL + Auth + REST behind Kong) is required,
+# not just the database container: the authenticated end-to-end smoke signs
+# in through GoTrue and queries through PostgREST with real JWT claims.
+# Studio, mail, realtime, storage and analytics are excluded: this gate needs
+# postgres, kong, gotrue and postgrest only.
+run_stage "Start the local Supabase stack (PostgreSQL, Auth, REST) through the Supabase CLI" \
+  supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,mailpit
 run_stage "Reset the local database, replay migrations, and load deterministic synthetic seed data" \
   supabase db reset --local
+
+CURRENT_STAGE="confirm the local Supabase API is serving (required for the authenticated smoke)"
+api_probe="$(supabase status --output env 2>/dev/null | awk -F= '$1 == "API_URL" || $1 == "SUPABASE_URL" { print; found = 1 } END { if (!found) exit 1 }')" || api_probe=""
+if [[ -z "$api_probe" ]]; then
+  printf '::error::supabase status did not expose an API URL: the full local stack is required (npm run verify:database starts it)\n' >&2
+  exit 2
+fi
+printf 'Local Supabase API: %s\n' "${api_probe#*=}"
 
 CURRENT_STAGE="resolve the local database connection"
 database_url="$(supabase status --output env | awk -F= '

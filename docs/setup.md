@@ -31,7 +31,7 @@ The elevated key is read only by `src/lib/supabase/admin.ts` (`server-only`) and
 The verification script is `scripts/verify-database.sh`, exposed as `npm run verify:database`. It runs fail-fast and reports the stage on failure. It:
 
 1. Checks that the project-locked Supabase CLI, Docker daemon and `psql` are available.
-2. Starts the local Postgres environment through `supabase db start`.
+2. Starts the full local Supabase stack through `supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,mailpit` — PostgreSQL plus the Auth and REST services behind Kong. The full stack (not just the database container) is required because the authenticated smoke signs in through GoTrue and queries through PostgREST with real JWT claims. Studio, mail, realtime, storage and analytics containers are excluded to keep the gate fast.
 3. Runs `supabase db reset --local`, which destroys/recreates the local database, replays **every repository migration from zero** and loads `supabase/seed.sql` (synthetic demo + isolation workspace). It does not skip or rewrite failing SQL.
 4. Runs `supabase/tests/phase2_integrity.sql` with `psql -X -v ON_ERROR_STOP=1`. The test prints actual PostgreSQL/PostGIS versions and verifies extension schema/version, required PostGIS functions, all ten tables, geography typmods/SRID, actual GiST index definitions, ownership constraints, deletion behavior, RLS/no policies, `PUBLIC`/client grants, and a rollback-only Tashkent distance sanity check.
 5. Runs `supabase/tests/phase3_spatial_queries.sql`. This asserts the seeded demo workspace is present, viewport/radius/nearest-branch/category/aggregate behavior at 500 m, 1 km, 3 km and 5 km, empty-radius behavior, request validation, `SECURITY INVOKER` + `service_role`-only execution, cross-workspace isolation (the colocated `isolation-test` rows must never appear), and GiST usability for the `ST_DWithin`/`ST_Intersects` predicates via predicate-only `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` probes.
@@ -51,7 +51,7 @@ npm run verify
 For an individual database run, derive the local connection string from the CLI rather than hardcoding credentials:
 
 ```bash
-supabase db start
+supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,mailpit
 supabase db reset --local
 SUPABASE_DB_URL="$(supabase status --output env | awk -F= '$1 == "DB_URL" { sub(/^[^=]*=/, ""); gsub(/\"/, ""); print; exit }')"
 psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase2_integrity.sql
@@ -123,8 +123,8 @@ These application checks complement—not replace—the clean database verificat
 
 ## Signing in against a local stack
 
-Phase 4 adds a minimal email/password sign-in flow. After `supabase db start`
-and `supabase db reset --local`, `supabase/seed.sql` has created deterministic
+Phase 4 adds a minimal email/password sign-in flow. After `supabase start` and
+`supabase db reset --local`, `supabase/seed.sql` has created deterministic
 local identities (password `phase4-demo-password`):
 
 | Email | Role |
