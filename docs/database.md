@@ -66,7 +66,7 @@ Every authoritative point column is `extensions.geography(Point, 4326)`. This is
 
 - `ST_DWithin(geography, geography, distance_meters)` uses meter distances and the spheroid by default; it can use a GiST index on the geography column.
 - Geography GiST also supports nearest-neighbor candidate ordering. The `<->` KNN ordering is spherical; refine/reorder shortlisted results with `ST_Distance(geography, geography, true)` when spheroidal ranking is required.
-- No separately authoritative latitude/longitude columns are stored. Geography enforces the point/SRID type; database checks additionally validate non-empty point coordinates within longitude/latitude ranges.
+- No separately authoritative latitude/longitude columns are stored. Geography enforces the point/SRID type; database checks validate non-empty stored points and their coordinate bounds. PostGIS normalizes longitude during geometry-to-geography conversion, so raw input longitude bounds must be validated before casting; the runtime domain validator does so. The rollback-only SQL gate asserts this observed normalization and verifies that an out-of-range latitude is rejected.
 - GeoJSON serialization should explicitly cast to geometry, e.g. `extensions.st_asgeojson(spatial_point::extensions.geometry)`. GeoJSON coordinate order is longitude, latitude.
 - Future point-in-polygon work can cast the WGS84 point to geometry and compare it with a WGS84 polygon using `ST_Covers`/`ST_Intersects`. The polygon remains a geometry because polygon topology/overlay operations are geometry-first. Service areas and metric analytics still need server-side design.
 
