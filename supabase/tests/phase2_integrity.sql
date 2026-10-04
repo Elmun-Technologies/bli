@@ -5,6 +5,8 @@ BEGIN;
 
 DO $phase2_integrity$
 DECLARE
+  expected_postgres_major integer;
+  violated_constraint text;
   postgis_schema name;
   postgis_extension_version text;
   postgis_library_version text;
@@ -46,10 +48,19 @@ BEGIN
     RAISE EXCEPTION 'Expected PostGIS in extensions; found %', COALESCE(postgis_schema::text, '<not installed>');
   END IF;
 
+  -- The release gate pins the major version declared in supabase/config.toml.
+  -- CI never sets the override below, so it always enforces the strict default
+  -- of 17. A supplementary local harness running an equivalent PostGIS build on
+  -- a different supported major may set bli.expected_postgres_major explicitly;
+  -- this must never be set in the clean-database workflow.
+  expected_postgres_major := COALESCE(
+    pg_catalog.current_setting('bli.expected_postgres_major', true)::integer,
+    17
+  );
   postgres_version_num := pg_catalog.current_setting('server_version_num')::integer;
-  IF postgres_version_num / 10000 <> 17 THEN
-    RAISE EXCEPTION 'Expected PostgreSQL 17 from supabase/config.toml; found %',
-      pg_catalog.current_setting('server_version');
+  IF postgres_version_num / 10000 <> expected_postgres_major THEN
+    RAISE EXCEPTION 'Expected PostgreSQL % from supabase/config.toml; found %',
+      expected_postgres_major, pg_catalog.current_setting('server_version');
   END IF;
 
   postgis_library_version := extensions.postgis_lib_version();
@@ -414,33 +425,75 @@ BEGIN
   END IF;
 
   -- Business records, projects, datasets and workspaces are not cascade-deleted.
+  -- PostgreSQL 17 reports an ON DELETE RESTRICT refusal as 23503
+  -- (foreign_key_violation); PostgreSQL 18 reports it as 23001
+  -- (restrict_violation) because RESTRICT is checked immediately and cannot be
+  -- deferred. Both are accepted, but each delete must be refused by the
+  -- specific ownership constraint that protects the referenced records.
   rejected := false;
+  violated_constraint := NULL;
   BEGIN
     DELETE FROM public.datasets WHERE id = dataset_a;
-  EXCEPTION WHEN foreign_key_violation THEN rejected := true;
+  EXCEPTION
+    WHEN foreign_key_violation OR restrict_violation THEN
+      rejected := true;
+      GET STACKED DIAGNOSTICS violated_constraint = CONSTRAINT_NAME;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'Referenced dataset deletion was not restricted'; END IF;
+  IF violated_constraint IS DISTINCT FROM 'locations_dataset_workspace_fk'
+     AND violated_constraint IS DISTINCT FROM 'customers_dataset_workspace_fk'
+     AND violated_constraint IS DISTINCT FROM 'competitors_dataset_workspace_fk'
+     AND violated_constraint IS DISTINCT FROM 'branches_dataset_workspace_fk' THEN
+    RAISE EXCEPTION 'Dataset deletion was refused by an unexpected constraint: %',
+      COALESCE(violated_constraint, '<none>');
+  END IF;
 
   rejected := false;
+  violated_constraint := NULL;
   BEGIN
     DELETE FROM public.projects WHERE id = project_a;
-  EXCEPTION WHEN foreign_key_violation THEN rejected := true;
+  EXCEPTION
+    WHEN foreign_key_violation OR restrict_violation THEN
+      rejected := true;
+      GET STACKED DIAGNOSTICS violated_constraint = CONSTRAINT_NAME;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'Project deletion with saved analysis was not restricted'; END IF;
+  IF violated_constraint IS DISTINCT FROM 'analysis_locations_project_workspace_fk' THEN
+    RAISE EXCEPTION 'Project deletion was refused by an unexpected constraint: %',
+      COALESCE(violated_constraint, '<none>');
+  END IF;
 
   rejected := false;
+  violated_constraint := NULL;
   BEGIN
     DELETE FROM public.workspaces WHERE id = workspace_a;
-  EXCEPTION WHEN foreign_key_violation THEN rejected := true;
+  EXCEPTION
+    WHEN foreign_key_violation OR restrict_violation THEN
+      rejected := true;
+      GET STACKED DIAGNOSTICS violated_constraint = CONSTRAINT_NAME;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'Workspace deletion with business data was not restricted'; END IF;
+  IF violated_constraint IS DISTINCT FROM 'projects_workspace_fk'
+     AND violated_constraint IS DISTINCT FROM 'datasets_workspace_fk'
+     AND violated_constraint IS DISTINCT FROM 'project_datasets_workspace_fk' THEN
+    RAISE EXCEPTION 'Workspace deletion was refused by an unexpected constraint: %',
+      COALESCE(violated_constraint, '<none>');
+  END IF;
 
   rejected := false;
+  violated_constraint := NULL;
   BEGIN
     DELETE FROM public.organizations WHERE id = organization_a;
-  EXCEPTION WHEN foreign_key_violation THEN rejected := true;
+  EXCEPTION
+    WHEN foreign_key_violation OR restrict_violation THEN
+      rejected := true;
+      GET STACKED DIAGNOSTICS violated_constraint = CONSTRAINT_NAME;
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'Organization deletion with a workspace was not restricted'; END IF;
+  IF violated_constraint IS DISTINCT FROM 'workspaces_organization_fk' THEN
+    RAISE EXCEPTION 'Organization deletion was refused by an unexpected constraint: %',
+      COALESCE(violated_constraint, '<none>');
+  END IF;
 
   IF NOT EXISTS (SELECT 1 FROM public.customers WHERE id = customer_a) THEN
     RAISE EXCEPTION 'Valid same-workspace customer row was not retained';
