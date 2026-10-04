@@ -18,6 +18,17 @@ A modular Web GIS and location-intelligence workspace for commercial site select
 - **Phase 4 membership:** `workspace_members` maps auth users to workspaces with a role (`owner`, `admin`, `analyst`, `viewer`). The workspace selector lists only memberships the database returns for the caller.
 - **Phase 4 tenant GIS:** `GET /api/workspaces/[workspaceId]/map/features` and `POST /api/workspaces/[workspaceId]/analysis/radius` validate the session, resolve membership, then execute a membership-asserting RPC under the caller's own session. A foreign workspace id and a non-existent one return the identical `403` body.
 
+## Phase 4 authentication, membership and RLS
+
+- **Sign-in:** `/sign-in` posts email/password to `POST /api/auth/sign-in`, which validates the session server-side through Supabase Auth and sets httpOnly SSR cookies. `POST /api/auth/sign-out` clears them. `src/proxy.ts` refreshes the session cookie; it is not a security boundary.
+- **Tenant routes require membership.** `/workspaces/[workspaceId]`, `GET /api/workspaces/[workspaceId]/map/features` and `POST /api/workspaces/[workspaceId]/analysis/radius` resolve the caller's membership from the database on every request. Editing the workspace id in the URL can never widen access: a foreign workspace and a non-existent one produce the identical `403` body, a non-member reaches only the safe no-access state, and anonymous callers get `Session expired. Please sign in again.`
+- **Roles are enforced in PostgreSQL.** `workspace_members` maps users to workspaces as `owner`, `admin`, `analyst` or `viewer`. The migration defines a deliberate policy per table and an explicit grant matrix (never `USING (true)`), and the last-owner protection and membership-immutability triggers make privilege escalation impossible through SQL, PostgREST or the app.
+- **The tenant GIS RPCs run as the caller** under the cookie-aware anon client (`SECURITY INVOKER` plus a membership assertion), so RLS stays an independent protection layer. The elevated credential is not used for tenant reads or writes.
+- **The public demo path is unchanged and separate:** `/api/demo/*` still serves only the fixed synthetic `atlas-demo`/`tashkent-demo` workspace with the server-only elevated client. Signing in grants no tenant access to it, and the demo RPCs remain `service_role`-only.
+- **First owner:** `public.bootstrap_workspace_owner(...)` (service_role-only, validated, idempotent) creates an organization, workspace and its first owner atomically for production; CI/dev uses deterministic seed identities instead. There is no signup funnel and no invitation email.
+
+The policy-by-policy and grant-by-grant reference, the elevated-credential inventory and the security test strategy live in [docs/auth-security.md](docs/auth-security.md).
+
 ## Phase 2 database foundation (unchanged)
 
 The ordered migrations add:
@@ -26,20 +37,21 @@ The ordered migrations add:
 2. `locations`, `customers`, `competitors`, `branches` and project-scoped `analysis_locations` point records.
 3. Composite foreign keys that prevent cross-workspace references at the database layer, conservative deletion behavior, constraints, timestamp triggers and workspace-oriented indexes.
 4. One authoritative `extensions.geography(Point,4326)` column per spatial record and a GiST index for each.
-5. RLS enabled with **no policies**, plus revocation of `PUBLIC`, `anon` and `authenticated` table privileges (default-deny until membership policies are designed).
+5. RLS enabled on every tenant table, plus revocation of `PUBLIC`, `anon` and `authenticated` table privileges (default-deny until membership policies were designed). Phase 4 then adds deliberate member-scoped policies and the matching grants.
 
 `analysis_locations` represents deliberately saved candidates. A map click remains transient client state and is not inserted into the database.
 
-## Phase 3 demo workspace and security boundary
+## Public demo workspace and its security boundary (Phase 3, unchanged in Phase 4)
 
-- The only live database path is the synthetic workspace `atlas-demo` / `tashkent-demo`, resolved **server-side** from deterministic slugs in `src/lib/spatial/demo-workspace.ts`. The browser cannot choose a workspace UUID.
+- The only live path that does **not** require a session is the synthetic workspace `atlas-demo` / `tashkent-demo`, resolved **server-side** from deterministic slugs in `src/lib/spatial/demo-workspace.ts`. The browser cannot choose a workspace UUID.
 - The elevated credential is read in `src/lib/supabase/admin.ts`, a `server-only` module that prefers Supabase's secret key (`SUPABASE_SECRET_KEY`) and falls back to the legacy service-role key (`SUPABASE_SERVICE_ROLE_KEY`). It is never imported into a Client Component, never prefixed with `NEXT_PUBLIC_`, never logged and never returned in an error response.
 - Spatial work runs through two narrowly scoped, independently testable SQL functions with `SECURITY INVOKER`: `public.demo_viewport_features(...)` and `public.demo_radius_analysis(...)`. `EXECUTE` is revoked from `PUBLIC`, `anon` and `authenticated` and granted only to `service_role`.
 - The `service_role` credential bypasses RLS by design; because it never reaches the browser and the RPCs bind themselves to the demo workspace, the demo cannot read another tenant's workspace through the API.
+- Phase 4 keeps this path exactly as it was: still public, still fixed to the synthetic workspace, still the only elevated-credential read path. Being signed in changes nothing about it, and the tenant routes still require membership of their workspace — including for the demo workspace, whose tenant URL is `/workspaces/<id>` and not the demo API.
 
 ## Database verification gate
 
-**Local database status: NOT VERIFIED HERE.** The project-local Supabase CLI is pinned to `2.119.0`, but Docker and `psql` are unavailable in this workspace. `.github/workflows/database-integrity.yml` is the release gate: it starts a fresh database, replays every migration from zero, loads `supabase/seed.sql`, runs the live PostGIS/ownership/RLS/index/Phase 3 spatial assertions, generates and checks database types, then runs the app checks. **A green TypeScript build alone does not validate SQL.** See [docs/setup.md](docs/setup.md).
+**Local database status: NOT VERIFIED HERE.** The project-local Supabase CLI is pinned to `2.119.0`, but Docker and `psql` are unavailable in this workspace. `.github/workflows/database-integrity.yml` is the release gate: it starts a fresh database, replays every migration from zero, loads `supabase/seed.sql`, runs the live Phase 2 catalog/integrity assertions, the Phase 3 spatial/index assertions and the Phase 4 membership/RLS/grant assertions, generates and checks database types, then runs the app checks including the fixtures smoke and the authenticated end-to-end smoke. **A green TypeScript build alone does not validate SQL.** See [docs/setup.md](docs/setup.md).
 
 ## Technology
 
@@ -54,25 +66,32 @@ The ordered migrations add:
 ```text
 src/
   app/                 App Router entry point, metadata and global styles
-    api/demo/          Viewport feature and radius analysis route handlers
+    api/demo/          Public demo viewport + radius route handlers
+    api/auth/          Minimal sign-in and sign-out route handlers
+    api/workspaces/    Authenticated tenant viewport + radius route handlers
+    sign-in/           Sign-in page
+    workspaces/        Workspace selector and the protected workspace page
   components/
     app/               Shell, search, layer control and PostGIS-backed analysis panel
     map/               Client-only MapLibre implementation, viewport loading and shared props
   lib/
+    auth/              Safe messages, server session helpers, membership resolver, unit tests
     data/              Synthetic Tashkent fixtures (display-only fallback)
     domain/            Validated coordinates and domain types
     database/          Generated Supabase types and server-side row aliases
     geo/               Visual circle geometry and tests
     map/               PII-safe GeoJSON adapter and tests
-    spatial/           DTOs, validation, client fetchers, demo workspace resolver, server service
-    supabase/          Server-only Supabase clients (SSR + elevated demo client)
+    spatial/           DTOs, validation, client fetchers, demo resolver, tenant service
+    supabase/          server.ts (cookie-aware anon) and admin.ts (server-only elevated)
+  proxy.ts             Supabase session refresh (Next 16 proxy convention)
 supabase/
   config.toml
-  migrations/          Ordered Phase 1–3 SQL migrations
-  seed.sql             Deterministic synthetic demo + isolation workspace data
-  tests/               Rollback-only Phase 2 and Phase 3 database assertions
+  migrations/          Ordered Phase 1–4 SQL migrations
+  seed.sql             Deterministic synthetic demo, isolation workspace and local auth users
+  tests/               Rollback-only Phase 2/3/4 database assertions
 docs/
   architecture.md
+  auth-security.md
   database.md
   gis-concepts.md
   setup.md
@@ -89,7 +108,7 @@ cp .env.example .env.local  # edit values; see the environment table below
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The map style and tiles are served by the configured external map provider; an internet connection is needed to load them. Database-backed demo mode additionally needs the server-side Supabase values and a seeded local project (see [docs/setup.md](docs/setup.md)). Without them, set `DATA_SOURCE=fixtures` for a display-only preview; radius analysis stays disabled.
+Open [http://localhost:3000](http://localhost:3000) for the public demo map, or [http://localhost:3000/workspaces](http://localhost:3000/workspaces) for the authenticated area (it redirects anonymous visitors to `/sign-in`). The map style and tiles are served by the configured external map provider; an internet connection is needed to load them. Database-backed mode additionally needs the server-side Supabase values and a seeded local project (see [docs/setup.md](docs/setup.md)); the seeded local identities sign in with the password `phase4-demo-password`. Without a database, set `DATA_SOURCE=fixtures` for a display-only preview; radius analysis stays disabled.
 
 Full clean database and application gate (requires Docker and `psql`; database reset is destructive to local data):
 
@@ -104,7 +123,8 @@ npm test
 npm run lint
 npm run typecheck
 npm run build
-npm run smoke:fixtures
+npm run smoke:fixtures   # needs no database
+npm run smoke:auth       # needs a running, seeded local Supabase and its credentials
 ```
 
 ## Environment variables
@@ -118,14 +138,14 @@ npm run smoke:fixtures
 | `SUPABASE_SECRET_KEY` | Yes for database mode | Server-only elevated key for the demo spatial RPCs (preferred). |
 | `SUPABASE_SERVICE_ROLE_KEY` | Legacy alternative | Server-only compatibility fallback when the project has no secret key. |
 
-Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/admin.ts` from a Client Component, and never log either key. RLS remains default-deny: later authentication must add both explicit SQL `GRANT`s and membership-aware RLS policies — one does not replace the other.
+Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/admin.ts` from a Client Component, and never log either key. `SUPABASE_ANON_KEY` is required for sign-in and the authenticated routes; the elevated key is used only by the public demo path, the operator bootstrap and CI setup. RLS is enabled everywhere with member-scoped policies: a policy never replaces a `GRANT`, and both layers are asserted in CI.
 
 ## Roadmap
 
 1. **Phase 1 — foundation (implemented):** Next.js, Tailwind, MapLibre shell, synthetic Tashkent fixtures.
 2. **Phase 2 / 2.5 — ownership/spatial schema and clean database gate (implemented):** workspace-safe tables, PostGIS geography, constraints/indexes, default-deny RLS, generated types, CI verification.
 3. **Phase 3 — DB-backed demo map and radius analysis (implemented):** server-side viewport features, PostGIS `ST_DWithin` radius aggregates, safe DTOs, demo-workspace boundary, server-only elevated credential.
-4. **Phase 4 — authentication and membership (not started):** workspace membership, role-aware RLS policies plus explicit grants, `resolveWorkspaceContext()` generalized beyond the fixed demo workspace.
+4. **Phase 4 — authentication and membership (implemented):** Supabase Auth email/password sign-in, `workspace_members` roles, deliberate per-table RLS policies with explicit grants, membership-checked tenant GIS RPCs, a protected workspace route and a minimal selector. The fixed demo path is unchanged.
 5. **Phase 5 — data operations (not started):** validated imports, provenance, privacy/retention controls and customer layers.
 6. **Phase 6 — intelligence (not started):** configurable, explainable scores and candidate comparison.
 7. **Phase 7 — reporting, tiles and optimization (not started):** vector tiles/`ST_AsMVT` at larger scale, exports and performance work.
@@ -133,6 +153,7 @@ Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/ad
 ## Documentation
 
 - [Architecture and phase boundaries](docs/architecture.md)
+- [Authentication, membership and RLS](docs/auth-security.md)
 - [Database schema, functions and RLS](docs/database.md)
 - [GIS concepts and spatial decisions](docs/gis-concepts.md)
 - [Local development and Supabase setup](docs/setup.md)

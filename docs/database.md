@@ -247,4 +247,27 @@ The same transaction verifies zero policies, RLS enabled on all tenant tables, n
 - radius/bbox validation raises `22023`; both RPCs are `SECURITY INVOKER`; `anon`/`authenticated` have no `EXECUTE` while `service_role` does;
 - predicate-only `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` probes (with `enable_seqscan` disabled for the probe only) confirm the GiST indexes on `customers_spatial_gix`, `competitors_spatial_gix`, `branches_spatial_gix` and `locations_spatial_gix` are usable by the `ST_DWithin` and `ST_Intersects` predicates used by the RPCs, and report the observed plan execution times.
 
+`supabase/tests/phase4_membership_rls.sql` is the Phase 4 gate. It runs in a
+transaction that is rolled back, switches to the real `anon`, `authenticated` and
+`service_role` roles, sets `request.jwt.claims` for each scenario identity, and
+asserts:
+
+- the helpers disclose only the caller's own role, return `NULL` for foreign and
+  non-existent workspaces, and are not executable by `anon`;
+- per-role PASS/FAIL matrices for viewer, analyst, admin and owner, with exact
+  row-scope checks against independently computed workspace row counts;
+- cross-workspace reads, writes, row moves, and dataset/project tampering are
+  refused by RLS, by the composite foreign keys or by the immutability triggers;
+- workspace-id tampering on both tenant RPCs (including a fabricated id) fails
+  with the same error, so the RPC is not an existence oracle; forged JWT claims
+  on the `anon` role grant nothing;
+- membership tampering: self-promotion, admin → owner, admin demoting an owner,
+  re-pointing a membership row, and deleting/upgrading the final owner;
+- workspace identity immutability (`organization_id`, `slug`);
+- the grant matrix for `anon`, `authenticated` and `service_role`, including that
+  inherited `TRUNCATE`/`REFERENCES`/`TRIGGER` privileges were revoked;
+- demo/tenant parity (the authenticated RPCs return the same rows and aggregates
+  as the demo RPCs for the same workspace) plus PII checks proving no customer
+  display name and no isolation-workspace row can appear.
+
 The GitHub Actions workflow and local script both perform a clean reset (with the synthetic seed) before these assertions. CI also compares the generated types to the committed generated file and runs the application pipeline. Local Docker/`psql` are unavailable in this workspace, so no local migration or SQL-test result is claimed. See [setup.md](setup.md) for commands and workflow details.
