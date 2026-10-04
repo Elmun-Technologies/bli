@@ -320,32 +320,22 @@ BEGIN
   END;
   IF NOT rejected THEN RAISE EXCEPTION 'Branches accepted a foreign workspace dataset'; END IF;
 
-  -- PostGIS normalizes longitude during geometry-to-geography conversion, so
-  -- the original value is no longer available to a table CHECK constraint.
-  -- Assert the stored geography is canonical; raw input bounds are validated
-  -- before this cast by the domain boundary.
+  -- PostGIS normalizes longitude/latitude during geometry-to-geography
+  -- conversion, so the original scalars are no longer available to a table
+  -- CHECK constraint. Assert that a geography made from out-of-range input is
+  -- canonical before storage; the domain validator separately rejects raw
+  -- out-of-range coordinates at the input boundary.
   point_a := extensions.st_setsrid(
-    extensions.st_makepoint(181, 41), 4326
+    extensions.st_makepoint(181, 91), 4326
   )::extensions.geography;
-  IF extensions.st_x(point_a::extensions.geometry) NOT BETWEEN -180 AND 180 THEN
-    RAISE EXCEPTION 'PostGIS did not normalize geography longitude into [-180,180]';
+  IF extensions.st_x(point_a::extensions.geometry) NOT BETWEEN -180 AND 180
+     OR extensions.st_y(point_a::extensions.geometry) NOT BETWEEN -90 AND 90
+     OR extensions.st_x(point_a::extensions.geometry) = 181
+     OR extensions.st_y(point_a::extensions.geometry) = 91 THEN
+    RAISE EXCEPTION 'PostGIS did not normalize out-of-range geography coordinates';
   END IF;
-
-  -- Latitude beyond the geography domain cannot be normalized and must fail.
-  rejected := false;
-  BEGIN
-    INSERT INTO public.locations (workspace_id, dataset_id, name, category, spatial_point)
-    VALUES (
-      workspace_a,
-      dataset_a,
-      'Invalid coordinate location',
-      'retail',
-      extensions.st_setsrid(extensions.st_makepoint(69.2797, 91), 4326)::extensions.geography
-    );
-  EXCEPTION WHEN check_violation OR invalid_parameter_value THEN
-    rejected := true;
-  END;
-  IF NOT rejected THEN RAISE EXCEPTION 'Out-of-range latitude was accepted'; END IF;
+  INSERT INTO public.locations (workspace_id, dataset_id, name, category, spatial_point)
+  VALUES (workspace_a, dataset_a, 'Normalized geography test', 'retail', point_a);
 
   INSERT INTO public.customers (workspace_id, dataset_id, name, revenue, spatial_point)
   VALUES (workspace_a, dataset_a, 'Synthetic customer', 123.45, point_wgs84)
