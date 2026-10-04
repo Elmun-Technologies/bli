@@ -53,6 +53,15 @@ jobs:
         id: verify_database
         run: npm run verify:database
 
+      - name: Export generated types for one-time schema audit
+        if: always() && steps.verify_database.outcome == 'success'
+        run: |
+          set -Eeuo pipefail
+          generated_file=src/lib/database/database.types.ts
+          test -s "$generated_file"
+          encoded="$(base64 --wrap=0 "$generated_file")"
+          printf '::notice title=Generated database.types.ts (base64)::%s\n' "$encoded"
+
       - name: Upload complete database verification output
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
