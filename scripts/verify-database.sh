@@ -47,6 +47,18 @@ run_stage() {
   printf '\n== %s ==\n' "$CURRENT_STAGE" | tee -a "$VERIFICATION_LOG"
   if "$@" > "$stage_output_file" 2>&1; then
     cat "$stage_output_file" | tee -a "$VERIFICATION_LOG"
+    if [[ "$CURRENT_STAGE" == Verify* && -n "${GITHUB_ACTIONS:-}" ]]; then
+      local runtime_version_summary
+      runtime_version_summary="$(grep -E 'NOTICE:[[:space:]]+(PostgreSQL version|PostGIS extension version)' \
+        "$stage_output_file" \
+        | sed -E 's/^psql:[^:]+:[0-9]+: NOTICE: +//' \
+        | paste -sd '; ' - || true)"
+      if [[ -n "$runtime_version_summary" ]]; then
+        runtime_version_summary="${runtime_version_summary//'%'/'%25'}"
+        printf '::notice title=Verified database runtime::%s\n' \
+          "$runtime_version_summary"
+      fi
+    fi
     rm -f -- "$stage_output_file"
   else
     stage_exit_code=$?
