@@ -86,6 +86,17 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # TEMPORARY: surface Phase 3 observed plan timings in the run summary.
+      - name: Report Phase 3 spatial plan timings
+        if: always()
+        run: |
+          set -Eeuo pipefail
+          if [ -f "$RUNNER_TEMP/bli-database-verification.log" ]; then
+            grep -E 'NOTICE:[[:space:]]+(ST_DWithin|ST_Intersects) plan used' \
+              "$RUNNER_TEMP/bli-database-verification.log" | sed -E 's/^psql:[^:]+:[0-9]+: NOTICE: +//' || true
+          fi
+        continue-on-error: true
+
       - name: Application tests
         run: npm test
 
