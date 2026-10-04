@@ -36,6 +36,30 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+/**
+ * Scenario markers and failure reporting. GitHub Actions annotations are the
+ * only channel that survives this workflow's log retention, so each scenario
+ * announces itself and a failure names the scenario it happened in. Secret-like
+ * values are redacted before anything is printed.
+ */
+let currentScenario = 'startup';
+
+function note(scenario: string) {
+  currentScenario = scenario;
+  if (process.env.GITHUB_ACTIONS) {
+    console.log(`::notice title=authenticated smoke::${scenario}`);
+  }
+}
+
+function sanitizeDiagnostic(text: string, limit = 1200): string {
+  return text
+    .replace(/eyJ[A-Za-z0-9._-]{10,}/g, '<redacted-jwt>')
+    .replace(/\b(?:sb|sk)_[A-Za-z0-9_-]{6,}/g, '<redacted-key>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, limit);
+}
+
 /** Minimal cookie jar: browsers and this script store the same SSR cookies. */
 class CookieJar {
   private readonly cookies = new Map<string, string>();
@@ -146,6 +170,7 @@ async function main() {
   try {
     await waitForServer(child);
 
+    note('1. The sign-in page renders a real form.');
     // 1. The sign-in page renders a real form.
     const signInPage = await fetch(`${BASE_URL}/sign-in`);
     const signInHtml = await signInPage.text();
@@ -153,6 +178,7 @@ async function main() {
     assert(signInHtml.includes('name="email"'), 'the sign-in form is missing the email field');
     assert(signInHtml.includes('name="password"'), 'the sign-in form is missing the password field');
 
+    note('2. Protected pages redirect anonymous visitors to sign-in.');
     // 2. Protected pages redirect anonymous visitors to sign-in.
     const anonymousJar = new CookieJar();
     const anonymousWorkspaces = await request('/workspaces', {}, anonymousJar);
@@ -165,6 +191,7 @@ async function main() {
       'anonymous /workspaces did not redirect to /sign-in',
     );
 
+    note('3. Anonymous tenant API calls are refused with the safe session message.');
     // 3. Anonymous tenant API calls are refused with the safe session message.
     const anonymousFeatures = await request(
       `/api/workspaces/${WORKSPACE_A}/map/features?west=69.2&south=41.25&east=69.36&north=41.37`,
@@ -177,6 +204,7 @@ async function main() {
       `anonymous tenant API returned an unsafe error: ${JSON.stringify(anonymousError)}`,
     );
 
+    note('4. A wrong password fails without revealing whether the account exists.');
     // 4. A wrong password fails without revealing whether the account exists.
     const wrongPasswordJar = new CookieJar();
     const wrongPassword = await signIn(
@@ -192,12 +220,14 @@ async function main() {
     );
     assert(wrongPasswordJar.isEmpty, 'a failed sign-in must not issue a session cookie');
 
+    note('5. Correct credentials establish a server-validated session.');
     // 5. Correct credentials establish a server-validated session.
     const ownerJar = new CookieJar();
     const signInResponse = await signIn(OWNER_A, ownerJar);
     assert(signInResponse.status === 200, `sign-in returned ${signInResponse.status}`);
     assert(!ownerJar.isEmpty, 'sign-in did not issue a session cookie');
 
+    note("6. The selector lists only the signed-in user's memberships.");
     // 6. The selector lists only the signed-in user's memberships.
     const workspacesResponse = await request('/workspaces', {}, ownerJar);
     assert(workspacesResponse.status === 200, `GET /workspaces returned ${workspacesResponse.status}`);
@@ -211,6 +241,7 @@ async function main() {
       'the selector leaked a workspace the caller is not a member of',
     );
 
+    note('7. The protected workspace route renders for a member.');
     // 7. The protected workspace route renders for a member.
     const workspaceResponse = await request(`/workspaces/${WORKSPACE_A}`, {}, ownerJar);
     assert(
@@ -218,6 +249,7 @@ async function main() {
       `GET /workspaces/{A} returned ${workspaceResponse.status}`,
     );
 
+    note('8. The authenticated viewport route answers for a member, and the shipped');
     // 8. The authenticated viewport route answers for a member, and the shipped
     //    browser parser accepts the payload.
     const viewportResponse = await request(
@@ -235,6 +267,7 @@ async function main() {
       }
     }
 
+    note('9. The authenticated radius route answers for a member.');
     // 9. The authenticated radius route answers for a member.
     const radiusResponse = await request(
       `/api/workspaces/${WORKSPACE_A}/analysis/radius`,
@@ -255,6 +288,7 @@ async function main() {
       `tenant radius returned no aggregates: ${JSON.stringify(radiusPayload).slice(0, 200)}`,
     );
 
+    note('10. Workspace-id tampering fails identically for a foreign workspace and a');
     // 10. Workspace-id tampering fails identically for a foreign workspace and a
     //     workspace that does not exist: no existence oracle, never a 200.
     const foreignViewport = await request(
@@ -300,12 +334,14 @@ async function main() {
       'the foreign workspace page did not render the safe no-access state',
     );
 
+    note('11. The public demo path is unaffected by the tenant routes.');
     // 11. The public demo path is unaffected by the tenant routes.
     const demoResponse = await fetch(`${BASE_URL}/api/demo/map/features?west=${BOUNDS.west}&south=${BOUNDS.south}&east=${BOUNDS.east}&north=${BOUNDS.north}`);
     assert(demoResponse.status === 200, `public demo returned ${demoResponse.status}`);
     const demoCollection = parseViewportFeatureCollection(await demoResponse.json());
     assert(demoCollection.features.length > 0, 'public demo returned no features');
 
+    note("12. Membership is per workspace: workspace B's owner cannot read A.");
     // 12. Membership is per workspace: workspace B's owner cannot read A.
     const viewerJar = new CookieJar();
     const viewerSignIn = await signIn(VIEWER_B, viewerJar);
@@ -320,6 +356,7 @@ async function main() {
       `workspace B owner reached workspace A with status ${viewerForeign.status}`,
     );
 
+    note('13. Sign-out invalidates the session server-side.');
     // 13. Sign-out invalidates the session server-side.
     const signOut = await request(
       '/api/auth/sign-out',
@@ -349,17 +386,27 @@ async function main() {
       }
     }
     if (serverLog.length > 0 && typeof process.exitCode === 'number' && process.exitCode !== 0) {
+      const tail = serverLog.join('').split('\n').slice(-40).join('\n');
+      if (process.env.GITHUB_ACTIONS) {
+        console.error(
+          `::notice title=authenticated smoke server output::${sanitizeDiagnostic(tail)}`,
+        );
+      }
       console.error('--- authenticated smoke server output ---');
-      console.error(serverLog.join(''));
+      console.error(tail);
     }
   }
 }
 
 main()
   .catch((error: unknown) => {
-    console.error(
-      `authenticated smoke failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    if (process.env.GITHUB_ACTIONS) {
+      console.error(
+        `::error title=authenticated smoke::[${currentScenario}] ${sanitizeDiagnostic(message, 400)}`,
+      );
+    }
+    console.error(`authenticated smoke failed: ${message}`);
     process.exitCode = 1;
   })
   .finally(() => {
