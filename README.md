@@ -101,6 +101,7 @@ npm test
 npm run lint
 npm run typecheck
 npm run build
+npm run smoke:fixtures
 ```
 
 ## Environment variables

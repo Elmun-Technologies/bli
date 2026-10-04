@@ -45,7 +45,7 @@ Run the whole database and application gate locally with:
 npm run verify
 ```
 
-`npm run verify` runs `npm run verify:database`, then `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build`. A green TypeScript build alone does **not** prove that SQL migrations or PostGIS behavior work.
+`npm run verify` runs `npm run verify:database`, then `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run smoke:fixtures`. A green TypeScript build alone does **not** prove that SQL migrations or PostGIS behavior work.
 
 For an individual database run, derive the local connection string from the CLI rather than hardcoding credentials:
 
@@ -81,7 +81,7 @@ supabase/migrations/20261004020000_phase2_spatial_entities.sql
 supabase/migrations/20261004030000_phase3_demo_spatial_queries.sql
 ```
 
-The Phase 2 preflight expects PostGIS in schema `extensions`, `extensions.geography`, geography `ST_DWithin`, and `pg_catalog.gen_random_uuid()`. `supabase/config.toml` targets PostgreSQL 17. The integrity test requires PostgreSQL 17 and PostGIS library version >=3.3.0, and logs the actual extension/library versions. An extension already installed in another schema is not moved by `CREATE EXTENSION IF NOT EXISTS`; the migration must fail until that state is deliberately resolved. Keep PostGIS types/functions schema-qualified.
+The Phase 2 preflight expects PostGIS in schema `extensions`, `extensions.geography`, geography `ST_DWithin`, and `pg_catalog.gen_random_uuid()`. `supabase/config.toml` targets PostgreSQL 17. The integrity test requires the PostgreSQL major declared in `supabase/config.toml` (17) and PostGIS library version >=3.3.0, and logs the actual extension/library versions. CI never overrides that major; a supplementary local harness may state `bli.expected_postgres_major` explicitly so it can run the same assertions on a different supported major, and PostgreSQL 18 reports `ON DELETE RESTRICT` refusals as SQLSTATE 23001 where 17 reported 23503, which the ownership assertions accept by constraint name. An extension already installed in another schema is not moved by `CREATE EXTENSION IF NOT EXISTS`; the migration must fail until that state is deliberately resolved. Keep PostGIS types/functions schema-qualified.
 
 ## Generated database types and boundaries
 
@@ -108,6 +108,9 @@ npm test
 npm run lint
 npm run typecheck
 npm run build
+npm run smoke:fixtures
 ```
+
+`npm test` covers domain, DTO, parser, validation and server-boundary units. `npm run smoke:fixtures` builds nothing itself; run it after `npm run build`, and it will start the production server with `DATA_SOURCE=fixtures` on a spare port (override with `SMOKE_PORT`), drive the shipped browser client against the shipped route handlers, and stop the server again. It needs no database or credentials, and it exists because database mode and fixtures mode can each pass their own tests while disagreeing with each other.
 
 These application checks complement—not replace—the clean database verification gate.
