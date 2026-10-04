@@ -246,8 +246,14 @@ async function main() {
       ownerJar,
     );
     assert(radiusResponse.status === 200, `tenant radius returned ${radiusResponse.status}`);
-    const radiusPayload = (await radiusResponse.json()) as { customerCount?: unknown };
-    assert(typeof radiusPayload.customerCount === 'number', 'tenant radius returned no aggregates');
+    const radiusPayload = (await radiusResponse.json()) as {
+      analysis?: { customersCount?: unknown; customersRevenueTotal?: unknown };
+    };
+    assert(
+      typeof radiusPayload.analysis?.customersCount === 'number' &&
+        typeof radiusPayload.analysis?.customersRevenueTotal === 'string',
+      `tenant radius returned no aggregates: ${JSON.stringify(radiusPayload).slice(0, 200)}`,
+    );
 
     // 10. Workspace-id tampering fails identically for a foreign workspace and a
     //     workspace that does not exist: no existence oracle, never a 200.
