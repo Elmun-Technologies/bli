@@ -5,6 +5,7 @@ import {
   buildViewportSearchParams,
   fetchViewportFeatures,
   requestRadiusAnalysis,
+  requestWorkspaceRadiusAnalysis,
   workspaceRadiusEndpoint,
   workspaceViewportEndpoint,
   SpatialApiError,
@@ -191,4 +192,27 @@ test('a workspace id in the path is URL-encoded, never interpolated raw', () => 
   const endpoint = workspaceViewportEndpoint('../../etc/passwd', BOUNDS, null);
   assert.equal(endpoint.includes('..%2F..%2Fetc%2Fpasswd'), true);
   assert.equal(endpoint.includes('/../../'), false);
+});
+
+test('the tenant radius fetcher requires the shared response envelope', async (t) => {
+  t.after(restoreFetch);
+
+  // The demo and tenant routes must return the same { analysis } envelope: the
+  // shared parser is what the browser actually runs, so a bare DTO is a broken
+  // deployment rather than an accepted alternative shape.
+  stubFetch(
+    () =>
+      new Response(JSON.stringify({ customersCount: 3, customersRevenueTotal: '666.49' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+  );
+
+  await assert.rejects(
+    requestWorkspaceRadiusAnalysis('00000000-0000-4000-8000-000000000010', {
+      candidate: { longitude: 69.2897, latitude: 41.3111 },
+      radiusMeters: 500,
+    }),
+    /invalid response/i,
+  );
 });

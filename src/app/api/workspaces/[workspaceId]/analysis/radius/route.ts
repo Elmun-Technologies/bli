@@ -35,7 +35,10 @@ export async function POST(
       return errorResponse(403, 'workspace_forbidden', SAFE_AUTH_MESSAGES.noWorkspaceAccess);
     }
 
-    return jsonResponse(await fetchWorkspaceRadiusAnalysis(workspaceId, analysisRequest));
+    // Same response envelope as the public demo route: the shared browser parser
+    // requires { analysis } and is what the installed client actually reads.
+    const analysis = await fetchWorkspaceRadiusAnalysis(workspaceId, analysisRequest);
+    return jsonResponse({ analysis });
   } catch (error) {
     if (error instanceof WorkspaceAccessQueryError) {
       console.error(
