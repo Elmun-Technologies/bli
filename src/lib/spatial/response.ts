@@ -9,6 +9,7 @@ import type {
   ViewportFeatureCollection,
 } from './contracts';
 import { MAX_VIEWPORT_FEATURES } from './dto';
+import { DATABASE_UUID_PATTERN, isAllowedServerMapFeatureId } from './feature-id';
 import { validateViewportBounds } from './validation';
 
 const ALLOWED_KINDS = new Set<string>(['customers', 'competitors', 'branches', 'places']);
@@ -30,7 +31,6 @@ const ALLOWED_ANALYSIS_KEYS = new Set([
 ]);
 const ALLOWED_CATEGORY_KEYS = new Set(['kind', 'category', 'count']);
 const ALLOWED_NEAREST_BRANCH_KEYS = new Set(['id', 'name', 'distanceMeters']);
-const DATABASE_UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -83,8 +83,10 @@ function parseFeature(value: unknown): SafeMapFeature {
 
   const properties = value.properties;
   const id = requiredString(properties.id, 'feature id');
-  if (!DATABASE_UUID_PATTERN.test(id)) {
-    throw new TypeError('Viewport API feature ids must be opaque UUIDs.');
+  if (!isAllowedServerMapFeatureId(id)) {
+    throw new TypeError(
+      'Viewport API feature ids must be opaque UUIDs or known synthetic fixture ids.',
+    );
   }
   const category = requiredString(properties.category, 'feature category', 100);
   const kind = requiredString(properties.kind, 'feature kind');

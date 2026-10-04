@@ -13,8 +13,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/lib/geo/*.test.ts src/lib/domain/*.test.ts src/lib/map/*.test.ts src/lib/spatial/*.test.ts src/components/app/*.test.ts",
+    "smoke:fixtures": "tsx scripts/smoke-fixtures-mode.ts",
     "verify:database": "bash scripts/verify-database.sh",
-    "verify": "npm run verify:database && npm test && npm run lint && npm run typecheck && npm run build"
+    "verify": "npm run verify:database && npm test && npm run lint && npm run typecheck && npm run build && npm run smoke:fixtures"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

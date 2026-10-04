@@ -10,10 +10,10 @@ import type {
   ViewportBounds,
   ViewportFeatureCollection,
 } from './contracts';
+import { DATABASE_UUID_PATTERN } from './feature-id';
 
 export const MAX_VIEWPORT_FEATURES = 2_500;
 export const VIEWPORT_RPC_FETCH_LIMIT = MAX_VIEWPORT_FEATURES + 1;
-const DATABASE_UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 const SPATIAL_KINDS = new Set<string>(['customers', 'competitors', 'branches', 'places']);
 const BUSINESS_KINDS = new Set<string>(['places', 'competitors', 'branches']);
 const ALLOWED_VIEWPORT_ROW_KEYS = new Set([

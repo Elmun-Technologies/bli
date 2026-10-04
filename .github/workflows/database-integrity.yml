@@ -98,6 +98,9 @@ jobs:
       - name: Production build
         run: npm run build
 
+      - name: Fixtures-mode end-to-end smoke (shipped client against shipped routes)
+        run: npm run smoke:fixtures
+
       - name: Stop local Supabase stack
         if: always()
         run: supabase stop --no-backup || true

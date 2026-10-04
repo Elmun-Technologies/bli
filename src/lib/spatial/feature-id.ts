@@ -4,14 +4,20 @@ export const DEMO_FIXTURE_ID_PATTERN = /^(?:customer|competitor|branch|place)-\d
 export const TRANSIENT_CANDIDATE_ID_PATTERN = /^candidate-site-\d+$/;
 
 /**
- * Map feature identifiers are opaque UUIDs (database mode) or known synthetic
- * fixture identifiers. Anything else — especially contact-shaped values — is
- * refused before it can reach map data.
+ * Identifiers the demo map API is allowed to return: opaque database UUIDs
+ * (database mode) or known synthetic fixture identifiers (fixtures mode).
+ * Anything else — especially contact-shaped values — is refused before it can
+ * reach map data.
+ */
+export function isAllowedServerMapFeatureId(value: string): boolean {
+  return DATABASE_UUID_PATTERN.test(value) || DEMO_FIXTURE_ID_PATTERN.test(value);
+}
+
+/**
+ * Identifiers accepted in the browser map layer. This adds the transient
+ * candidate marker, which only ever exists client-side and must never be
+ * accepted from an API response.
  */
 export function isAllowedMapFeatureId(value: string): boolean {
-  return (
-    DATABASE_UUID_PATTERN.test(value) ||
-    DEMO_FIXTURE_ID_PATTERN.test(value) ||
-    TRANSIENT_CANDIDATE_ID_PATTERN.test(value)
-  );
+  return isAllowedServerMapFeatureId(value) || TRANSIENT_CANDIDATE_ID_PATTERN.test(value);
 }
