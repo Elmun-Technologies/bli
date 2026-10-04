@@ -46,9 +46,21 @@ trap report_failure ERR
 run_stage() {
   CURRENT_STAGE="$1"
   shift
+  local stage_output_file
+  local stage_exit_code
+  stage_output_file="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/bli-stage-output.XXXXXX")"
+
   printf '\n::group::%s\n' "$CURRENT_STAGE"
   printf '\n== %s ==\n' "$CURRENT_STAGE" | tee -a "$VERIFICATION_LOG"
-  "$@" 2>&1 | tee -a "$VERIFICATION_LOG"
+  if "$@" > "$stage_output_file" 2>&1; then
+    cat "$stage_output_file" | tee -a "$VERIFICATION_LOG"
+    rm -f -- "$stage_output_file"
+  else
+    stage_exit_code=$?
+    cat "$stage_output_file" | tee -a "$VERIFICATION_LOG" >&2
+    rm -f -- "$stage_output_file"
+    return "$stage_exit_code"
+  fi
   printf '::endgroup::\n'
 }
 
