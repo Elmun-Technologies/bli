@@ -21,6 +21,13 @@ report_failure() {
   printf '::endgroup::\n' >&2
   printf '::error::Database verification failed during: %s (exit %s)\n' \
     "$CURRENT_STAGE" "$exit_code" >&2
+  if [[ "$CURRENT_STAGE" == Verify* ]]; then
+    while IFS= read -r log_line; do
+      log_line="${log_line//'%'/'%25'}"
+      log_line="${log_line//$'\r'/'%0D'}"
+      printf '::error title=Database verification detail::%s\n' "$log_line" >&2
+    done < <(tail -n 25 "$VERIFICATION_LOG")
+  fi
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       printf '\n## Database verification failure\n\nStage: `%s` (exit %s)\n\n' \
