@@ -17,6 +17,21 @@ export const IDLE_ANALYSIS_STATE: AnalysisState = {
   stale: false,
 };
 
+/**
+ * Results stay visible but are explicitly marked stale until the candidate and
+ * radius match a completed server analysis. Stale metrics are never presented
+ * as belonging to the new radius.
+ */
+export function resolveAnalysisState(
+  analysis: AnalysisState,
+  currentKey: string,
+): AnalysisState {
+  return {
+    ...analysis,
+    stale: Boolean(analysis.view) && analysis.key !== currentKey,
+  };
+}
+
 export function analysisSourceLabel(
   dataSource: DataSourceMode,
   analysis: AnalysisState,

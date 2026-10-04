@@ -6,6 +6,7 @@ import { MapPin, MousePointer2 } from 'lucide-react';
 import { AnalysisPanel } from '@/components/app/analysis-panel';
 import {
   IDLE_ANALYSIS_STATE,
+  resolveAnalysisState,
   type AnalysisState,
 } from '@/components/app/analysis-state';
 import { ComingSoon } from '@/components/app/coming-soon';
@@ -44,10 +45,6 @@ const EMPTY_LAYER_COUNTS: Record<MapLayerId, number> = {
   branches: 0,
   places: 0,
 };
-
-function isBusinessKind(kind: string): kind is Exclude<MapLayerId, 'customers'> {
-  return kind === 'places' || kind === 'competitors' || kind === 'branches';
-}
 
 export function AppShell({ dataSource }: { dataSource: DataSourceMode }) {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('Map');
@@ -161,10 +158,7 @@ export function AppShell({ dataSource }: { dataSource: DataSourceMode }) {
   // Results stay visible but are explicitly marked stale until the candidate
   // and radius match a completed server analysis.
   const resolvedAnalysis: AnalysisState = useMemo(
-    () => ({
-      ...analysis,
-      stale: Boolean(analysis.view) && analysis.key !== currentAnalysisKey,
-    }),
+    () => resolveAnalysisState(analysis, currentAnalysisKey),
     [analysis, currentAnalysisKey],
   );
 

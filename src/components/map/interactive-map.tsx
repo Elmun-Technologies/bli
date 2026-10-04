@@ -12,8 +12,8 @@ import {
 import type { FeatureCollection, Point } from 'geojson';
 
 import { DEFAULT_SELECTED_LOCATION, TASHKENT_CENTER } from '@/lib/data/demo-locations';
-import { validateCoordinates, type Coordinates } from '@/lib/domain/coordinates';
-import type { DisplayLocation, MapLayerId, SelectedLocation } from '@/lib/domain/map-location';
+import { validateCoordinates } from '@/lib/domain/coordinates';
+import type { DisplayLocation, SelectedLocation } from '@/lib/domain/map-location';
 import { createCirclePolygon } from '@/lib/geo/circle';
 import { toMapPointFeatureCollection } from '@/lib/map/map-feature-adapter';
 import type {
@@ -23,12 +23,7 @@ import type {
 } from '@/lib/spatial/contracts';
 import { fetchViewportFeatures, SpatialApiError } from '@/lib/spatial/client';
 import { MAX_VIEWPORT_LATITUDE_SPAN, MAX_VIEWPORT_LONGITUDE_SPAN } from '@/lib/spatial/validation';
-import type {
-  MapDataState,
-  MapDataStatus,
-  MapViewportSnapshot,
-  MapViewProps,
-} from '@/components/map/map-types';
+import type { MapDataStatus, MapViewProps } from '@/components/map/map-types';
 
 const DEFAULT_MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
 const POINT_SOURCE_ID = 'pilot-points';

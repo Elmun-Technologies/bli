@@ -60,7 +60,7 @@ export async function fetchDemoViewportFeatures(
     p_south: bounds.south,
     p_east: bounds.east,
     p_north: bounds.north,
-    p_kinds: kinds,
+    p_kinds: kinds ?? undefined,
     p_limit: VIEWPORT_RPC_FETCH_LIMIT,
   });
 
