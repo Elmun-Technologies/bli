@@ -52,13 +52,17 @@ run_stage() {
     stage_exit_code=$?
     cat "$stage_output_file" | tee -a "$VERIFICATION_LOG" >&2
     if [[ "$CURRENT_STAGE" == Verify* ]]; then
-      printf '::error title=Database verification output bytes::%s\n' \
-        "$(wc -c < "$stage_output_file" | tr -d '[:space:]')" >&2
-      while IFS= read -r log_line; do
-        log_line="${log_line//'%'/'%25'}"
-        log_line="${log_line//$'\r'/'%0D'}"
-        printf '::error title=Database verification detail::%s\n' "$log_line" >&2
-      done < "$stage_output_file"
+      local diagnostic_output
+      diagnostic_output="$(grep -E '(^|[[:space:]])(ERROR|FATAL|PANIC):|^(DETAIL|HINT|CONTEXT):' \
+        "$stage_output_file" | tail -n 12 || true)"
+      if [[ -z "$diagnostic_output" ]]; then
+        diagnostic_output="$(tail -n 12 "$stage_output_file")"
+      fi
+      diagnostic_output="${diagnostic_output//'%'/'%25'}"
+      diagnostic_output="${diagnostic_output//$'\r'/'%0D'}"
+      diagnostic_output="${diagnostic_output//$'\n'/'%0A'}"
+      printf '::error title=Database verification SQL diagnostic::%s\n' \
+        "$diagnostic_output" >&2
     fi
     rm -f -- "$stage_output_file"
     return "$stage_exit_code"
