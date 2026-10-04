@@ -10,10 +10,11 @@ BLI is a location-intelligence workspace for business users: select an analysis 
 - **Phase 2 — implemented:** ownership schema, workspace-safe composite constraints, PostGIS geography point tables, indexes, timestamp triggers, default-deny RLS, runtime coordinate validation and PII-allow-listed map adapter.
 - **Phase 2.5 — verification gate implemented:** pinned CLI, clean-reset script, live catalog/integrity assertions, generated types and GitHub Actions coverage.
 - **Phase 3 — implemented:** database-backed demo map (viewport features), server-side PostGIS radius analysis, safe DTOs, server-only elevated credential, deterministic synthetic seed, cross-workspace isolation assertions.
+- **Phase 4 — implemented:** Supabase Auth (email/password) with a minimal sign-in/sign-out surface, `workspace_members` with an owner/admin/analyst/viewer role enum, deliberate per-table RLS policies for `authenticated`, an explicit grant matrix, membership- and RLS-checked tenant viewport/radius RPCs, a protected `/workspaces/[workspaceId]` route and a membership-only workspace selector. The public demo path is unchanged.
 - **LOCAL DATABASE NOT VERIFIED:** Docker and `psql` are unavailable in this workspace; local app checks do not substitute for the CI database gate.
-- **NOT STARTED:** authentication/membership, imports, geocoding, scoring, heatmaps, reports, routing, territories or server-side vector tiles.
+- **NOT STARTED:** imports, geocoding, scoring, heatmaps, reports, routing, territories, server-side vector tiles, workspace invitations and administrative UI beyond the minimal selector.
 
-See [database.md](database.md) for migration/schema/RLS detail and [setup.md](setup.md) for verification instructions.
+See [database.md](database.md) for migration/schema/RLS detail, [auth-security.md](auth-security.md) for the Phase 4 trust model and [setup.md](setup.md) for verification instructions.
 
 ## Phase 3 data flow
 
@@ -83,7 +84,55 @@ organizations
 
 Projects and datasets each belong to one workspace and can be related many-to-many only within that workspace. Business records point to datasets using `(dataset_id, workspace_id)`, while persisted `analysis_locations` point to projects using `(project_id, workspace_id)`. The application cannot create a cross-workspace association even if it sends inconsistent IDs.
 
-## Phase 3 security model
+## Phase 4 data flow (tenant path)
+
+```text
+browser ── POST /api/auth/sign-in ────────────► email/password → Supabase Auth
+                                                 │ SSR session cookies (httpOnly)
+browser ── GET /workspaces/[workspaceId] ────► Server Component
+                                                 │ requireSessionUser()  (auth.getUser, server-validated)
+                                                 │ resolveWorkspaceAccess()  (RLS-filtered membership + role)
+                                                 ▼
+                                        NoAccessState | workspace shell (role badge + selector)
+browser ── GET/POST /api/workspaces/[id]/* ──► Route handler
+                                                 │ session → membership → RLS-aware session client
+                                                 ▼
+                        public.workspace_viewport_features / workspace_radius_analysis
+                                                 │ SECURITY INVOKER · membership assertion 42501 first
+                                                 │ RLS filters every table read
+                                                 ▼
+                        same display-safe DTOs and client parsers as the demo path
+```
+
+The two paths share DTOs, validation and client parsers, but never credentials:
+the demo path uses the elevated server client, the tenant path uses the caller's
+cookie-aware anon client. `src/lib/spatial/server-boundary.test.ts` pins which
+modules may import `@/lib/supabase/admin`.
+
+## Phase 4 authorization model
+
+1. **Sessions are validated server-side.** `getSessionUser()` calls
+   `auth.getUser()`, so a forged or expired cookie cannot authorize anything.
+   `src/proxy.ts` only refreshes cookies; it is not a security boundary.
+2. **Membership is data, not UI state.** `workspace_members` is the only source
+   of truth for who may touch a workspace, and every read of it goes through RLS.
+   The workspace id in a URL or request body is untrusted input: the resolver
+   returns the same `null` for "not a member" and "no such workspace".
+3. **Role checks exist twice.** Route handlers resolve the caller's role for
+   routing decisions, and the RPCs separately assert membership before touching
+   data (raising `42501` before any bounds validation, so an unauthorized caller
+   cannot even probe validation behaviour). Table-level writes are governed by
+   RLS policies, so a handler mistake cannot become a data breach.
+4. **Elevated credentials never serve tenant requests.** The service-role client
+   is limited to the public demo path, the operator bootstrap and CI setup.
+5. **Trustworthy defaults.** `anon` holds no privilege on any table and cannot
+   execute any function. RLS remains enabled everywhere, with no `USING (true)`.
+
+The full policy, grant and helper documentation lives in
+[auth-security.md](auth-security.md); the schema section of
+[database.md](database.md) records the migration-level detail.
+
+## Phase 3 security model (public demo path, unchanged)
 
 Authentication and workspace membership do not exist yet, so the live database path is deliberately narrow:
 

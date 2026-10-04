@@ -2,7 +2,7 @@
 
 A modular Web GIS and location-intelligence workspace for commercial site selection, customer coverage and market analysis. The first pilot is Tashkent, Uzbekistan; the application architecture is city- and country-agnostic.
 
-> **Phase 3 (DB-backed demo map + PostGIS radius analysis) is implemented; the clean database gate is green in GitHub Actions.** The map now loads display-safe features from PostGIS for the fixed synthetic demo workspace, viewport filtering happens server-side, and the analysis panel shows authoritative PostGIS `ST_DWithin` aggregates. There is still **no** authentication, no workspace membership and no user-facing tenant data API — the live database path is deliberately restricted to one synthetic demo workspace. Local database execution is unavailable in this workspace; CI is the verified database environment.
+> **Phase 4 (Supabase Auth + workspace membership + production RLS) is implemented; the clean database gate is green in GitHub Actions.** Two separate trust models now exist side by side. The public synthetic demo (`/api/demo/*`) is unchanged: display-safe PostGIS viewport features and `ST_DWithin` radius aggregates for the fixed demo workspace, served with a server-only elevated credential. The tenant path is new: email/password sign-in, server-validated sessions, a protected `/workspaces/[workspaceId]` route whose membership and role are resolved in the database, and authenticated viewport/analytic endpoints that run under the caller's own RLS-aware session. Owner/admin/analyst/viewer permissions are enforced by PostgreSQL policies and grants, never by the UI. Local database execution is unavailable in this workspace; CI is the verified database environment.
 
 ## Current capabilities
 
@@ -14,6 +14,9 @@ A modular Web GIS and location-intelligence workspace for commercial site select
 - Display-safe DTOs: business/POI features may carry an explicit display name; customer map features carry only `id`, `kind` and `category` — never name, address, phone, company or revenue.
 - Explicit data mode via `DATA_SOURCE`: `database` (default, PostGIS) or `fixtures` (display-only development fallback). A database failure is never silently replaced by fixture data, and radius analysis is refused in fixture mode.
 - `server-only` elevated Supabase client for the demo RPCs; RLS remains default-deny with no client grants or policies.
+- **Phase 4 authentication:** minimal email/password sign-in (`/sign-in`, `POST /api/auth/sign-in`), server-side sign-out, a session refreshed by `src/proxy.ts`, and safe error messages only (`Invalid email or password.`, `You do not have access to this workspace.`, `Session expired. Please sign in again.`). No signup funnel, password reset, OAuth, magic links or profile settings.
+- **Phase 4 membership:** `workspace_members` maps auth users to workspaces with a role (`owner`, `admin`, `analyst`, `viewer`). The workspace selector lists only memberships the database returns for the caller.
+- **Phase 4 tenant GIS:** `GET /api/workspaces/[workspaceId]/map/features` and `POST /api/workspaces/[workspaceId]/analysis/radius` validate the session, resolve membership, then execute a membership-asserting RPC under the caller's own session. A foreign workspace id and a non-existent one return the identical `403` body.
 
 ## Phase 2 database foundation (unchanged)
 

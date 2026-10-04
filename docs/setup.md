@@ -35,7 +35,8 @@ The verification script is `scripts/verify-database.sh`, exposed as `npm run ver
 3. Runs `supabase db reset --local`, which destroys/recreates the local database, replays **every repository migration from zero** and loads `supabase/seed.sql` (synthetic demo + isolation workspace). It does not skip or rewrite failing SQL.
 4. Runs `supabase/tests/phase2_integrity.sql` with `psql -X -v ON_ERROR_STOP=1`. The test prints actual PostgreSQL/PostGIS versions and verifies extension schema/version, required PostGIS functions, all ten tables, geography typmods/SRID, actual GiST index definitions, ownership constraints, deletion behavior, RLS/no policies, `PUBLIC`/client grants, and a rollback-only Tashkent distance sanity check.
 5. Runs `supabase/tests/phase3_spatial_queries.sql`. This asserts the seeded demo workspace is present, viewport/radius/nearest-branch/category/aggregate behavior at 500 m, 1 km, 3 km and 5 km, empty-radius behavior, request validation, `SECURITY INVOKER` + `service_role`-only execution, cross-workspace isolation (the colocated `isolation-test` rows must never appear), and GiST usability for the `ST_DWithin`/`ST_Intersects` predicates via predicate-only `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` probes.
-6. Generates `src/lib/database/database.types.ts` using the local schema, atomically replacing the generated file only after the CLI succeeds.
+6. Runs `supabase/tests/phase4_membership_rls.sql`. This suite connects as the real `anon`, `authenticated` and `service_role` roles and sets `request.jwt.claims`, so the policies exercised are exactly the ones PostgREST applies: helper disclosure, the per-role PASS/FAIL matrix, cross-workspace reads/writes and row moves, workspace-id tampering on the tenant RPCs, membership tampering (self-promotion, admin → owner, final-owner removal), workspace identity immutability, the grant matrix, and demo/tenant parity including PII checks.
+7. Generates `src/lib/database/database.types.ts` using the local schema, atomically replacing the generated file only after the CLI succeeds.
 
 **Warning:** `supabase db reset --local` is destructive to the local Supabase database. The SQL integrity script's own synthetic fixtures run inside a transaction and are rolled back. Do not point these commands at a production database.
 
@@ -45,7 +46,7 @@ Run the whole database and application gate locally with:
 npm run verify
 ```
 
-`npm run verify` runs `npm run verify:database`, then `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run smoke:fixtures`. A green TypeScript build alone does **not** prove that SQL migrations or PostGIS behavior work.
+`npm run verify` runs `npm run verify:database`, then `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run smoke:fixtures`. The authenticated end-to-end smoke (`npm run smoke:auth`) is a separate command because it needs a running, seeded local Supabase stack plus credentials in the environment; CI runs it after the fixtures smoke. A green TypeScript build alone does **not** prove that SQL migrations or PostGIS behavior work.
 
 For an individual database run, derive the local connection string from the CLI rather than hardcoding credentials:
 
@@ -55,6 +56,7 @@ supabase db reset --local
 SUPABASE_DB_URL="$(supabase status --output env | awk -F= '$1 == "DB_URL" { sub(/^[^=]*=/, ""); gsub(/\"/, ""); print; exit }')"
 psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase2_integrity.sql
 psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase3_spatial_queries.sql
+psql "$SUPABASE_DB_URL" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase4_membership_rls.sql
 supabase gen types --lang typescript --local --schema public > src/lib/database/database.types.ts
 ```
 
@@ -79,7 +81,11 @@ supabase/migrations/20261004000000_enable_postgis.sql
 supabase/migrations/20261004010000_phase2_ownership_schema.sql
 supabase/migrations/20261004020000_phase2_spatial_entities.sql
 supabase/migrations/20261004030000_phase3_demo_spatial_queries.sql
+supabase/migrations/20261004040000_phase4_auth_membership.sql
 ```
+
+The Phase 4 migration assumes Supabase Auth's `auth.users` table exists; it fails
+loudly rather than silently skipping membership functionality.
 
 The Phase 2 preflight expects PostGIS in schema `extensions`, `extensions.geography`, geography `ST_DWithin`, and `pg_catalog.gen_random_uuid()`. `supabase/config.toml` targets PostgreSQL 17. The integrity test requires the PostgreSQL major declared in `supabase/config.toml` (17) and PostGIS library version >=3.3.0, and logs the actual extension/library versions. CI never overrides that major; a supplementary local harness may state `bli.expected_postgres_major` explicitly so it can run the same assertions on a different supported major, and PostgreSQL 18 reports `ON DELETE RESTRICT` refusals as SQLSTATE 23001 where 17 reported 23503, which the ownership assertions accept by constraint name. An extension already installed in another schema is not moved by `CREATE EXTENSION IF NOT EXISTS`; the migration must fail until that state is deliberately resolved. Keep PostGIS types/functions schema-qualified.
 
@@ -114,3 +120,44 @@ npm run smoke:fixtures
 `npm test` covers domain, DTO, parser, validation and server-boundary units. `npm run smoke:fixtures` builds nothing itself; run it after `npm run build`, and it will start the production server with `DATA_SOURCE=fixtures` on a spare port (override with `SMOKE_PORT`), drive the shipped browser client against the shipped route handlers, and stop the server again. It needs no database or credentials, and it exists because database mode and fixtures mode can each pass their own tests while disagreeing with each other.
 
 These application checks complement—not replace—the clean database verification gate.
+
+## Signing in against a local stack
+
+Phase 4 adds a minimal email/password sign-in flow. After `supabase db start`
+and `supabase db reset --local`, `supabase/seed.sql` has created deterministic
+local identities (password `phase4-demo-password`):
+
+| Email | Role |
+| --- | --- |
+| `owner-a@example.test` | owner of `tashkent-demo` |
+| `admin-a@example.test` | admin of `tashkent-demo` |
+| `analyst-a@example.test` | analyst of `tashkent-demo` |
+| `viewer-a@example.test` | viewer of `tashkent-demo` |
+| `owner-b@example.test` | owner of `isolation-test` (workspace B) |
+| `outsider@example.test` | no membership (safe no-access state) |
+| `operator@example.test` | no membership; used by the bootstrap test |
+
+Then run the app in database mode and open
+`http://localhost:3000/workspaces/<workspace-id>`. Anonymous visitors are
+redirected to `/sign-in`; a signed-in user without membership in the requested
+workspace gets the safe no-access state, and the selector lists only the
+workspaces the database says they belong to. These identities are synthetic
+**local/CI only** and must never be seeded into a deployed project.
+
+The authenticated end-to-end smoke drives exactly that flow through the shipped
+routes:
+
+```bash
+npm run build
+export $(supabase status --output env | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY|SECRET_KEY|PUBLISHABLE_KEY)=' | xargs)  # or set the values yourself
+export SUPABASE_URL="${API_URL:-$SUPABASE_URL}" SUPABASE_ANON_KEY="${ANON_KEY:-$PUBLISHABLE_KEY}" SUPABASE_SECRET_KEY="${SERVICE_ROLE_KEY:-$SECRET_KEY}"
+npm run smoke:auth
+```
+
+It signs in (and deliberately fails a wrong password), checks the selector, the
+protected page, both tenant GIS endpoints, workspace-id tampering (foreign and
+missing workspaces must be indistinguishable), cross-workspace denial, the still
+public demo endpoint, and that sign-out invalidates the session server-side. It
+needs `SUPABASE_URL`, `SUPABASE_ANON_KEY` and an elevated key
+(`SUPABASE_SECRET_KEY` or `SUPABASE_SERVICE_ROLE_KEY`) for the public demo route,
+and it starts the production server on `SMOKE_PORT` (default 3312).
