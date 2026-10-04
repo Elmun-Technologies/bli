@@ -6,6 +6,9 @@ cd "$ROOT_DIR"
 
 CURRENT_STAGE="preflight"
 TEMP_TYPES_FILE=""
+VERIFICATION_LOG="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/bli-database-verification.log"
+mkdir -p "$(dirname -- "$VERIFICATION_LOG")"
+: > "$VERIFICATION_LOG"
 
 cleanup() {
   if [[ -n "$TEMP_TYPES_FILE" ]]; then
@@ -18,6 +21,15 @@ report_failure() {
   printf '::endgroup::\n' >&2
   printf '::error::Database verification failed during: %s (exit %s)\n' \
     "$CURRENT_STAGE" "$exit_code" >&2
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      printf '\n## Database verification failure\n\nStage: `%s` (exit %s)\n\n' \
+        "$CURRENT_STAGE" "$exit_code"
+      printf 'Last verification output:\n\n```text\n'
+      tail -n 250 "$VERIFICATION_LOG"
+      printf '\n```\n'
+    } >> "$GITHUB_STEP_SUMMARY"
+  fi
   exit "$exit_code"
 }
 
@@ -28,7 +40,8 @@ run_stage() {
   CURRENT_STAGE="$1"
   shift
   printf '\n::group::%s\n' "$CURRENT_STAGE"
-  "$@"
+  printf '\n== %s ==\n' "$CURRENT_STAGE" | tee -a "$VERIFICATION_LOG"
+  "$@" 2>&1 | tee -a "$VERIFICATION_LOG"
   printf '::endgroup::\n'
 }
 

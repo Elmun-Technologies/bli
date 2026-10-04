@@ -53,6 +53,15 @@ jobs:
         id: verify_database
         run: npm run verify:database
 
+      - name: Upload complete database verification output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: database-verification-log-${{ github.run_id }}
+          path: ${{ runner.temp }}/bli-database-verification.log
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Ensure generated database types are checked in and current
         run: |
           set -Eeuo pipefail

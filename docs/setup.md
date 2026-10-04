@@ -58,7 +58,7 @@ The third line uses the CLI's current env output (`supabase status --output env`
 - Requires the generated types to be committed and byte-for-byte current with the freshly migrated schema; uploads the verified type file as a short-lived artifact for review.
 - Runs application tests, lint, typecheck and production build as separate visible steps.
 
-A migration, PostGIS assertion, constraint/RLS assertion, type generation/drift check, or application step failure makes the workflow fail. npm dependencies may be cached; PostgreSQL/Docker state may not.
+A migration, PostGIS assertion, constraint/RLS assertion, type generation/drift check, or application step failure makes the workflow fail. The verification script labels the failing stage, writes the final 250 lines to the GitHub step summary, and uploads the full database verification log when available. npm dependencies may be cached; PostgreSQL/Docker state may not.
 
 ## Migration order and spatial preflight
 
