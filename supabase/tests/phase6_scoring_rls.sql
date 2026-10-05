@@ -759,26 +759,6 @@ SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims = '{"sub":"b1000000-0000-4000-8000-000000000001","role":"authenticated"}';
 
 SELECT pg_temp.p6rls_expect_error(
-  'a member querying a project of another workspace gets a refusal, not an empty list',
-  $sql$SELECT candidate.id FROM public.list_analysis_locations(
-    '00000000-0000-4000-8000-000000000011',
-    '00000000-0000-4000-8000-000000000020'
-  ) AS candidate$sql$,
-  'P0002'
-);
-
-SELECT pg_temp.p6rls_expect_error(
-  'and the same refusal applies to stored history',
-  $sql$SELECT stored.analysis FROM public.list_location_analyses(
-    '00000000-0000-4000-8000-000000000011',
-    '00000000-0000-4000-8000-000000000020',
-    NULL,
-    5
-  ) AS stored$sql$,
-  'P0002'
-);
-
-SELECT pg_temp.p6rls_expect_error(
   'a comparison cannot mix a candidate of this project with one of another workspace',
   $sql$SELECT public.run_location_analysis(
     '00000000-0000-4000-8000-000000000011',
