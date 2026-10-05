@@ -18,7 +18,7 @@
  * reset and seeded.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { inflateSync } from 'node:zlib';
@@ -98,10 +98,31 @@ let currentScenario = 'startup';
 
 function note(scenario: string) {
   currentScenario = scenario;
+  // Plain lines, not ::notice annotations: the job's annotation budget is shared
+  // with four other smokes, and it must be free for the failure annotation this
+  // script emits below (the CI log itself is not always readable from outside).
+  console.log(`\n== ${scenario}`);
+}
+
+const FAILURE_FILE =
+  process.env.SMOKE_FAILURE_FILE ??
+  path.join(process.env.RUNNER_TEMP ?? '/tmp', 'report-smoke-failure.txt');
+
+/**
+ * Records a failure where CI can surface it even when the raw log is unreachable:
+ * a readable file for the workflow's diagnostics step (which re-emits it as an
+ * ::error annotation) plus stderr for the normal log path. Secrets are redacted
+ * by the same sanitizer used for the server-log tail.
+ */
+function recordFailure(detail: string) {
+  const safe = sanitizeDiagnostic(detail, 1800);
+  try {
+    writeFileSync(FAILURE_FILE, `${currentScenario}\n${safe}\n`, 'utf8');
+  } catch {
+    // Diagnostics must never mask the real failure.
+  }
   if (process.env.GITHUB_ACTIONS) {
-    console.log(`::notice title=report smoke::${scenario}`);
-  } else {
-    console.log(`\n== ${scenario}`);
+    console.log(`::error title=report smoke failure::${currentScenario} — ${safe.slice(0, 900)}`);
   }
 }
 
@@ -901,10 +922,12 @@ async function main() {
 
     console.log('\nreport smoke: all scenarios passed');
   } catch (error) {
-    console.error(`\nreport smoke failed during: ${currentScenario}`);
-    console.error(sanitizeDiagnostic(error instanceof Error ? `${error.message}` : String(error)));
+    const message = sanitizeDiagnostic(error instanceof Error ? `${error.message}` : String(error));
     const tail = sanitizeDiagnostic(serverLog.join(''), 2000);
+    console.error(`\nreport smoke failed during: ${currentScenario}`);
+    console.error(message);
     if (tail) console.error(`\nserver log tail:\n${tail}`);
+    recordFailure(`${message}${tail ? ` | server log tail: ${tail}` : ''}`);
     throw error;
   } finally {
     activeJar = null;

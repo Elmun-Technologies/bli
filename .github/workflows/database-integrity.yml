@@ -188,6 +188,10 @@ jobs:
         if: failure()
         run: |
           printf '::notice title=report smoke::the smoke drives the shipped report API with the deterministic fake map provider (no Mapbox token, no map credits), parses every response with the shipped parser and prints the failing scenario plus the server log tail.\n'
+          failure_file="${RUNNER_TEMP}/report-smoke-failure.txt"
+          if [ -s "$failure_file" ]; then
+            printf '::error title=report smoke::%s\n' "$(tr '\n' ' ' < "$failure_file" | cut -c1-900)"
+          fi
 
       - name: Stop local Supabase stack
         if: always()
