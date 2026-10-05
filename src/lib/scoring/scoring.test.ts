@@ -20,7 +20,20 @@ import test from 'node:test';
 
 import { findMetric, formatMetricValue, formatScore, scoreBandLabel, SCORE_BANDS } from './catalogue';
 import { buildComparisonCsv, comparisonCsvFilename } from './export';
-import { parseScoringAnalysis, parseScoringModel, parseScoringModelList } from './payload';
+import {
+  parseCandidateListResponse,
+  parseScoringAnalysis,
+  parseScoringModel,
+  parseScoringModelList,
+  parseStoredAnalysisListResponse,
+  parseWorkspaceProjectList,
+} from './payload';
+import {
+  NO_PROJECT_MESSAGE,
+  PROJECT_REQUIRED_MESSAGE,
+  resolveProjectContext,
+  type WorkspaceProjectSummary,
+} from './projects';
 import type { AnalysisCandidateResult, ScoringAnalysisPayload, ScoringFactor } from './types';
 import {
   checkFactorSet,
@@ -52,6 +65,25 @@ function factor(overrides: Partial<ScoringFactor> = {}): ScoringFactor {
     ...overrides,
   };
 }
+
+const PROJECTS: WorkspaceProjectSummary[] = [
+  { id: '00000000-0000-4000-8000-000000000020', name: 'Expansion 2026', status: 'active' },
+  { id: '00000000-0000-4000-8000-000000000022', name: 'Expansion 2027', status: 'active' },
+];
+const PROJECT_A = PROJECTS[0].id;
+const FOREIGN_PROJECT = '00000000-0000-4000-8000-000000000021';
+const MISSING_PROJECT = '00000000-0000-4000-8000-0000000000ff';
+
+test('the shared project messages stay the safe, documented pair', () => {
+  assert.equal(
+    PROJECT_REQUIRED_MESSAGE,
+    'Select a project in this workspace before continuing.',
+  );
+  assert.equal(
+    NO_PROJECT_MESSAGE,
+    'No project is available. Create or select a project before running location analysis.',
+  );
+});
 
 test('the captured single-candidate payload parses into the typed contract', () => {
   const payload = fixture('stored-analysis');
@@ -552,4 +584,92 @@ test('CSV cells with separators are quoted, not mangled', () => {
   const dataLine = csv.trim().split('\n')[1];
 
   assert.match(dataLine, /"Site ""A"", corner shop"/);
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6.5 - explicit project context.
+// ---------------------------------------------------------------------------
+
+test('zero projects resolve to the empty state and never invent a project', () => {
+  assert.deepEqual(resolveProjectContext([], null), { status: 'empty' });
+  assert.deepEqual(resolveProjectContext([], PROJECT_A), { status: 'unknown' });
+});
+
+test('exactly one project resolves unambiguously, for a read or a write', () => {
+  assert.deepEqual(resolveProjectContext([PROJECTS[0]], null), {
+    status: 'resolved',
+    projectId: PROJECTS[0].id,
+  });
+  assert.deepEqual(resolveProjectContext([PROJECTS[0]], PROJECTS[0].id), {
+    status: 'resolved',
+    projectId: PROJECTS[0].id,
+  });
+});
+
+test('several projects without an explicit id demand a selection instead of picking one', () => {
+  assert.deepEqual(resolveProjectContext(PROJECTS, null), { status: 'required' });
+});
+
+test('an explicitly named project is accepted only when it is one of the caller own', () => {
+  assert.deepEqual(resolveProjectContext(PROJECTS, PROJECTS[1].id), {
+    status: 'resolved',
+    projectId: PROJECTS[1].id,
+  });
+  assert.deepEqual(resolveProjectContext(PROJECTS, FOREIGN_PROJECT), { status: 'unknown' });
+  assert.deepEqual(resolveProjectContext(PROJECTS, MISSING_PROJECT), { status: 'unknown' });
+});
+
+test('a foreign project id is never silently replaced by the only project', () => {
+  assert.deepEqual(resolveProjectContext([PROJECTS[0]], FOREIGN_PROJECT), { status: 'unknown' });
+  assert.deepEqual(resolveProjectContext([PROJECTS[0]], MISSING_PROJECT), { status: 'unknown' });
+});
+
+test('the project list, candidate list and analysis list parse the shipped envelopes', () => {
+  const projects = parseWorkspaceProjectList({
+    projects: [
+      { id: PROJECTS[0].id, name: 'Expansion 2026', status: 'active' },
+      { id: PROJECTS[1].id, name: 'Expansion 2027', status: 'active' },
+    ],
+  });
+  assert.equal(projects.length, 2);
+  assert.equal(projects[0].name, 'Expansion 2026');
+
+  const candidates = parseCandidateListResponse({
+    projects,
+    projectId: PROJECTS[1].id,
+    candidates: [
+      {
+        id: '00000000-0000-4000-8000-000000000099',
+        name: 'Saved site',
+        longitude: 69.28,
+        latitude: 41.31,
+        created_at: '2026-10-05T06:00:00.000Z',
+      },
+    ],
+  });
+  assert.equal(candidates.projectId, PROJECTS[1].id);
+  assert.equal(candidates.candidates.length, 1);
+  assert.equal(candidates.candidates[0].name, 'Saved site');
+
+  const empty = parseCandidateListResponse({ projects: [], projectId: null, candidates: [] });
+  assert.equal(empty.projectId, null);
+  assert.deepEqual(empty.projects, []);
+
+  const history = parseStoredAnalysisListResponse({ projectId: null, analyses: [] });
+  assert.equal(history.projectId, null);
+  assert.deepEqual(history.analyses, []);
+});
+
+test('a candidate list without the project envelope is rejected, never guessed', () => {
+  assert.throws(
+    () => parseCandidateListResponse({ projectId: PROJECTS[0].id, candidates: [] }),
+    /projects/,
+  );
+});
+
+test('the project id is read as a string, and a null id only means no project', () => {
+  assert.throws(
+    () => parseCandidateListResponse({ projects: [], projectId: 7, candidates: [] }),
+    /projectId/,
+  );
 });

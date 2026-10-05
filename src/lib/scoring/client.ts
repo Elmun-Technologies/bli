@@ -13,9 +13,12 @@ import {
   parseScoringModel,
   parseScoringModelList,
   parseStoredAnalysisListResponse,
+  parseWorkspaceProject,
+  parseWorkspaceProjectList,
   type CandidateListResponse,
   type StoredAnalysisListResponse,
 } from './payload';
+import type { WorkspaceProjectSummary } from './projects';
 import type {
   SavedCandidate,
   ScoringAnalysisPayload,
@@ -120,13 +123,40 @@ export function updateScoringModel(
 }
 
 /**
- * Saved candidate locations of a workspace. Without a project id the server
- * resolves the workspace's own project and returns both, so the interface never
- * has to guess an identifier and can never name a foreign project.
+ * Projects of the caller's own workspace. Used by the explicit project selector;
+ * the server lists only what the caller's membership may see.
+ */
+export function listWorkspaceProjects(workspaceId: string): Promise<WorkspaceProjectSummary[]> {
+  return request(workspaceId, '/projects', parseWorkspaceProjectList);
+}
+
+/** Creates a project explicitly. Owner or admin only, enforced by the server. */
+export function createWorkspaceProject(
+  workspaceId: string,
+  input: { name: string; description?: string | null },
+): Promise<WorkspaceProjectSummary> {
+  return request(
+    workspaceId,
+    '/projects',
+    (payload) => parseWorkspaceProject((payload as { project: unknown }).project),
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: input.name, description: input.description ?? null }),
+    },
+  );
+}
+
+/**
+ * Saved candidate locations of one explicitly selected project. The response
+ * also names the projects the caller may select, plus the project that answered,
+ * so the interface never guesses an identifier and can never name a foreign
+ * project. With several projects the server refuses an unnamed project instead
+ * of picking one; `projectId` is null only for the zero-project empty state.
  */
 export function listSavedCandidates(
   workspaceId: string,
-  projectId?: string | null,
+  projectId: string | null,
 ): Promise<CandidateListResponse> {
   const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
   return request(workspaceId, `/candidates${query}`, parseCandidateListResponse);
@@ -181,7 +211,7 @@ export function getStoredAnalysis(
 
 export function listStoredAnalyses(
   workspaceId: string,
-  projectId?: string | null,
+  projectId: string | null,
   options: { mode?: ScoringMode | null; limit?: number } = {},
 ): Promise<StoredAnalysisListResponse> {
   const limit = options.limit ?? 20;

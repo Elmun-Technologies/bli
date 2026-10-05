@@ -7,6 +7,7 @@ import {
   analysisHeadline,
   mapCandidatesFromPayload,
   comparisonReady,
+  retainProjectScopedSelection,
   selectionMessage,
   snapshotSummary,
   scoringTabLabel,
@@ -92,4 +93,40 @@ test('the freshness message appears only for a flagged snapshot', () => {
   const flagged = payload('stored-analysis');
   flagged.analysis.mayBeOutdated = true;
   assert.match(analysisFreshnessMessage(flagged) ?? '', /may be outdated/i);
+});
+
+test('switching projects clears the previous project selection and comparison set', () => {
+  const candidatesA = [{ id: 'candidate-a' }, { id: 'candidate-b' }];
+  const candidatesB = [{ id: 'candidate-c' }];
+
+  // The switch happens before the new project's list has arrived: nothing of the
+  // previous project may survive.
+  const cleared = retainProjectScopedSelection(
+    { selectedCandidateId: 'candidate-a', compareIds: ['candidate-a', 'candidate-b'] },
+    [],
+  );
+  assert.equal(cleared.selectedCandidateId, null);
+  assert.deepEqual(cleared.compareIds, []);
+
+  // Once the new project's candidates load, only its own ids can be retained.
+  const retained = retainProjectScopedSelection(
+    { selectedCandidateId: 'candidate-a', compareIds: ['candidate-a', 'candidate-c'] },
+    candidatesB,
+  );
+  assert.equal(retained.selectedCandidateId, null);
+  assert.deepEqual(retained.compareIds, ['candidate-c']);
+
+  // And a genuine selection inside one project is kept.
+  const kept = retainProjectScopedSelection(
+    { selectedCandidateId: 'candidate-b', compareIds: ['candidate-a', 'candidate-b'] },
+    candidatesA,
+  );
+  assert.equal(kept.selectedCandidateId, 'candidate-b');
+  assert.deepEqual(kept.compareIds, ['candidate-a', 'candidate-b']);
+
+  // A project-scoped id can never leak into a project that does not contain it.
+  assert.deepEqual(
+    retainProjectScopedSelection({ selectedCandidateId: 'candidate-c', compareIds: [] }, candidatesA),
+    { selectedCandidateId: null, compareIds: [] },
+  );
 });

@@ -25,6 +25,8 @@ export const SCORING_ERROR_CODES = [
   'duplicate_model',
   'invalid_candidate',
   'invalid_selection',
+  'project_required',
+  'no_project',
   'not_found',
   'session_expired',
   'workspace_forbidden',
@@ -54,6 +56,12 @@ function mapRequestCode(code: string): ScoringErrorCode {
       return 'duplicate_model';
     case 'invalid_model':
       return 'invalid_model';
+    // A missing project id, a foreign project id and a project that does not
+    // exist all map to `project_required`, so the response is never an oracle.
+    case 'project_required':
+      return 'project_required';
+    case 'no_project':
+      return 'no_project';
     default:
       return 'invalid_request';
   }

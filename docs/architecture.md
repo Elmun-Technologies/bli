@@ -12,10 +12,12 @@ BLI is a location-intelligence workspace for business users: select an analysis 
 - **Phase 3 — implemented:** database-backed demo map (viewport features), server-side PostGIS radius analysis, safe DTOs, server-only elevated credential, deterministic synthetic seed, cross-workspace isolation assertions.
 - **Phase 4 — implemented:** Supabase Auth (email/password) with a minimal sign-in/sign-out surface, `workspace_members` with an owner/admin/analyst/viewer role enum, deliberate per-table RLS policies for `authenticated`, an explicit grant matrix, membership- and RLS-checked tenant viewport/radius RPCs, a protected `/workspaces/[workspaceId]` route and a membership-only workspace selector. The public demo path is unchanged.
 - **Phase 5 — implemented:** a six-step import pipeline (upload → columns → mapping → validation → geocoding → commit) for CSV/XLSX files: content-sniffed parsing, multilingual column mapping, deterministic per-row validation with machine-readable errors, private storage with membership-scoped policies, a provider-abstracted geocoder (Mapbox Geocoding v6 permanent-only in production, a deterministic fake in CI), bounded resumable batches, manual placement, a transactional idempotent commit with provenance into `customers`/`locations`, and a formula-safe error export. No `service_role` is used anywhere in the tenant import path.
+- **Phase 6 — implemented:** a versioned, workspace-owned scoring model (factors: metric, weight, direction, normalization), the `run_location_analysis` engine that measures every candidate through the existing PostGIS radius analysis and stores an immutable snapshot (raw metrics, normalized values, contributions, rank, model revision), a Locations section with saved-candidate, analysis, comparison and model-editor tabs, a strict payload parser shared by client and smoke, and the SQL/unit/smoke coverage described in [scoring.md](scoring.md).
+- **Phase 6.5 — implemented:** explicit project context. There is no implicit "oldest project" selection left in the code base: a request names its project, the server verifies it against the caller's own workspace projects, a missing project id in a multi-project workspace is a safe `400`, a foreign or non-existent project id fails identically (no existence oracle), candidates and histories are project-scoped, mixed-project comparisons are refused by the engine, and scoring models stay workspace-owned and reusable across projects. A compact project selector (with a documented zero-project empty state) heads the Locations section.
 - **LOCAL DATABASE NOT VERIFIED:** Docker and `psql` are unavailable in this workspace; local app checks do not substitute for the CI database gate.
-- **NOT STARTED:** scoring, heatmaps, reports, routing, territories, server-side vector tiles, workspace invitations, administrative UI beyond the minimal selector, imports into other entity types, background workers and retention automation.
+- **NOT STARTED:** heatmaps, PDF reports, AI recommendations, routing, territories, server-side vector tiles, workspace invitations, administrative UI beyond the minimal selector, imports into other entity types, billing, CRM sync, dataset versioning, background workers and retention automation.
 
-See [database.md](database.md) for migration/schema/RLS detail, [auth-security.md](auth-security.md) for the Phase 4 trust model, [imports.md](imports.md) and [geocoding.md](geocoding.md) for Phase 5 and [setup.md](setup.md) for verification instructions.
+See [database.md](database.md) for migration/schema/RLS detail, [auth-security.md](auth-security.md) for the Phase 4 trust model, [imports.md](imports.md) and [geocoding.md](geocoding.md) for Phase 5, [scoring.md](scoring.md) for Phase 6/6.5 and [setup.md](setup.md) for verification instructions.
 
 ## Phase 3 data flow
 
@@ -188,9 +190,12 @@ Import state is the staging tables plus the job row; there is no queue and no wo
 
 ```
 Locations panel (client)
-  GET  scoring-models / candidates / analyses      → membership-checked routes
-  POST analyses | comparisons                      → validation → run_location_analysis
-                                                     (metrics → normalization → weights → score)
+  GET  projects                                    → membership-checked routes (project selector)
+  GET  scoring-models / candidates / analyses      → membership-checked routes, project-scoped
+  POST analyses | comparisons                      → validation (explicit, verified projectId)
+                                                     → run_location_analysis
+                                                     (metrics → normalization → weights → score;
+                                                      candidates must belong to that project)
   GET  analyses/{id}                               → the stored payload, exactly as written
 
 run_location_analysis (database, authoritative)
@@ -218,6 +223,11 @@ Rules that make the flow explainable and reproducible:
   recalcs a stored analysis; the freshness flag is advisory only.
 - Saving a candidate is an explicit user action (`POST …/candidates`); a map click only selects a
   point, so no analysis is ever triggered implicitly.
+- The project is explicit too: `GET /projects` (or the `projects` array inside the candidates
+  response) feeds a selector, every candidate/analysis/comparison call carries a `projectId`, the
+  server verifies it against the caller's memberships, and the interface clears every selection that
+  belonged to the previous project when the selector changes. The URL (`?project=<uuid>`) is a deep
+  link only — the server re-validates on every request.
 
 ## Caching policy
 

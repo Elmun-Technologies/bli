@@ -29,6 +29,7 @@ import type {
   ScoringThresholdPoint,
   StoredAnalysis,
 } from './types';
+import type { WorkspaceProjectSummary } from './projects';
 
 export class ScoringPayloadError extends Error {
   constructor(message: string) {
@@ -316,32 +317,63 @@ export function parseSavedCandidateList(value: unknown): SavedCandidate[] {
   });
 }
 
+export function parseWorkspaceProject(value: unknown): WorkspaceProjectSummary {
+  const project = asObject(value, 'project');
+  return {
+    id: asString(project.id, 'project.id'),
+    name: asString(project.name, 'project.name'),
+    status: asString(project.status ?? 'active', 'project.status'),
+  };
+}
+
+export function parseWorkspaceProjectList(value: unknown): WorkspaceProjectSummary[] {
+  const rows = Array.isArray(value) ? value : asArray(asObject(value, 'projects').projects, 'projects');
+  return rows.map(parseWorkspaceProject);
+}
+
 /**
- * The stored-analysis list returns one row per analysis, each holding the same
- * payload shape as a single read, so both go through the same parser.
+ * A project id is either an explicit selection or `null` for the zero-project
+ * state; the server never invents one, and the interface never guesses one.
+ */
+function asProjectIdOrNull(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  return asString(value, field);
+}
+
+/**
+ * The candidates read carries the workspace's selectable projects plus the
+ * project that answered, so the interface can render the project selector and
+ * the project-scoped list from one response. `projectId` is null only when the
+ * workspace has no project at all.
  */
 export interface CandidateListResponse {
-  projectId: string;
+  projects: WorkspaceProjectSummary[];
+  projectId: string | null;
   candidates: SavedCandidate[];
 }
 
 export function parseCandidateListResponse(value: unknown): CandidateListResponse {
   const body = asObject(value, 'candidates');
   return {
-    projectId: asString(body.projectId, 'candidates.projectId'),
+    projects: parseWorkspaceProjectList(body.projects),
+    projectId: asProjectIdOrNull(body.projectId, 'candidates.projectId'),
     candidates: parseSavedCandidateList(body),
   };
 }
 
+/**
+ * The stored-analysis list returns one row per analysis, each holding the same
+ * payload shape as a single read, so both go through the same parser.
+ */
 export interface StoredAnalysisListResponse {
-  projectId: string;
+  projectId: string | null;
   analyses: ScoringAnalysisPayload[];
 }
 
 export function parseStoredAnalysisListResponse(value: unknown): StoredAnalysisListResponse {
   const body = asObject(value, 'analyses');
   return {
-    projectId: asString(body.projectId, 'analyses.projectId'),
+    projectId: asProjectIdOrNull(body.projectId, 'analyses.projectId'),
     analyses: parseStoredAnalysisList(body),
   };
 }

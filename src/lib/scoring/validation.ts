@@ -332,6 +332,30 @@ export interface CandidateInput {
   latitude: number;
 }
 
+export interface ProjectInput {
+  name: string;
+  description: string | null;
+}
+
+/**
+ * Explicit project creation. The browser never gets a workspace id of its own
+ * choosing and the server never creates a project on its own: this parses a name
+ * a person typed, and the database policies decide whether they may create it.
+ */
+export function parseProjectRequest(body: unknown): ProjectInput {
+  if (typeof body !== 'object' || body === null) {
+    throw new ScoringValidationError('A JSON body is required.');
+  }
+  const raw = body as Record<string, unknown>;
+  const name = requireText(raw.name, 'project name', 120);
+  const description =
+    typeof raw.description === 'string' && raw.description.trim()
+      ? raw.description.trim().slice(0, 500)
+      : null;
+
+  return { name, description };
+}
+
 export function parseCandidateRequest(body: unknown): CandidateInput {
   if (typeof body !== 'object' || body === null) {
     throw new ScoringValidationError('A JSON body is required.');

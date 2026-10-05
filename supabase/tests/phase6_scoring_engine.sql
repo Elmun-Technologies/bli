@@ -1,4 +1,4 @@
--- Phase 6 scoring engine assertions: raw metrics, normalization, weights,
+-- Phase 6 / 6.5 scoring engine assertions: raw metrics, normalization, weights,
 -- contributions, deterministic rounding, snapshots and freshness.
 --
 -- Run only against a local/test Supabase database after `supabase db reset`:
@@ -475,6 +475,136 @@ SELECT pg_temp.phase6_expect_error(
     69.28,
     41.31
   )$sql$,
+  'P0002'
+);
+
+-- --------------------------------------------------------- two-project fixture
+-- A second project in the same workspace, one candidate in each, so project
+-- scoping can be asserted directly instead of assumed.
+INSERT INTO public.projects (id, workspace_id, name, description)
+VALUES (
+  '00000000-0000-4000-8000-000000000022',
+  '00000000-0000-4000-8000-000000000011',
+  'Phase 6.5 second project',
+  'Project scoping fixture: candidates and analyses must never cross this line.'
+);
+
+INSERT INTO public.analysis_locations (id, workspace_id, project_id, name, spatial_point, address, metadata)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000000067',
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021',
+    'Scoping project one candidate',
+    extensions.st_setsrid(extensions.st_makepoint(69.2797, 41.3111), 4326)::extensions.geography,
+    'Synthetic fixture',
+    '{}'::jsonb
+  ),
+  (
+    '00000000-0000-4000-8000-000000000068',
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000022',
+    'Scoping project two candidate',
+    extensions.st_setsrid(extensions.st_makepoint(69.2600, 41.2950), 4326)::extensions.geography,
+    'Synthetic fixture',
+    '{}'::jsonb
+  );
+
+SELECT pg_temp.phase6_expect_true(
+  'the named project never lists a candidate of the other project',
+  $sql$SELECT pg_catalog.count(*) > 0
+          AND pg_catalog.bool_and(name <> 'Scoping project two candidate')
+        FROM public.list_analysis_locations(
+               '00000000-0000-4000-8000-000000000011',
+               '00000000-0000-4000-8000-000000000021'
+             )$sql$
+);
+
+SELECT pg_temp.phase6_expect_true(
+  'the other project lists only its own candidate',
+  $sql$SELECT pg_catalog.count(*) = 1
+          AND pg_catalog.bool_and(name = 'Scoping project two candidate')
+        FROM public.list_analysis_locations(
+               '00000000-0000-4000-8000-000000000011',
+               '00000000-0000-4000-8000-000000000022'
+             )$sql$
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'a project that does not exist answers exactly like a foreign project',
+  $sql$SELECT candidate.id FROM public.list_analysis_locations(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-0000000000ff'
+  ) AS candidate$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'a project of another workspace is never listed as an empty project',
+  $sql$SELECT candidate.id FROM public.list_analysis_locations(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020'
+  ) AS candidate$sql$,
+  'P0002'
+);
+
+-- ------------------------------------------------------ mixed-project refusal
+SELECT pg_temp.phase6_expect_error(
+  'a comparison mixing two projects is refused',
+  $sql$SELECT public.run_location_analysis(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021',
+    ARRAY[
+      '00000000-0000-4000-8000-000000000067'::uuid,
+      '00000000-0000-4000-8000-000000000068'::uuid
+    ],
+    500, (SELECT model_id FROM phase6_models WHERE label = 'threshold'), 'comparison'
+  )$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'a candidate of the other project is refused even alone',
+  $sql$SELECT public.run_location_analysis(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021',
+    ARRAY['00000000-0000-4000-8000-000000000068'::uuid],
+    500, (SELECT model_id FROM phase6_models WHERE label = 'threshold'), 'analysis'
+  )$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'saving a candidate into a foreign project of the same workspace is refused',
+  $sql$SELECT saved.id FROM public.save_analysis_location(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020',
+    'Wrong project candidate',
+    69.28,
+    41.31
+  ) AS saved$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'history of a foreign project is refused instead of returning an empty list',
+  $sql$SELECT stored.analysis FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020',
+    NULL,
+    5
+  ) AS stored$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'history of a project that does not exist answers exactly like a foreign one',
+  $sql$SELECT stored.analysis FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-0000000000ff',
+    NULL,
+    5
+  ) AS stored$sql$,
   'P0002'
 );
 
@@ -1332,6 +1462,68 @@ SELECT pg_temp.phase6_expect_text(
   'metric text keeps the original serialized decimal',
   $sql$SELECT public.scoring_metric_text('{"customers_revenue_total": "1300.02"}'::jsonb, 'customers_revenue_total')$sql$,
   '1300.02'
+);
+
+-- --------------------------------------------------------- model reusability
+-- A scoring model belongs to the workspace, not to a project: the same model
+-- scores a candidate of the second project, and no per-project copy exists.
+SELECT pg_temp.phase6_expect_true(
+  'the workspace model scores a candidate of the second project too',
+  $sql$SELECT pg_catalog.jsonb_typeof(
+          public.run_location_analysis(
+            '00000000-0000-4000-8000-000000000011',
+            '00000000-0000-4000-8000-000000000022',
+            ARRAY['00000000-0000-4000-8000-000000000068'::uuid],
+            500, (SELECT model_id FROM phase6_models WHERE label = 'threshold'), 'analysis'
+          ) -> 'analysis'
+        ) = 'object'$sql$
+);
+
+SELECT pg_temp.phase6_expect_true(
+  'both projects still select the one workspace-owned model',
+  $sql$SELECT pg_catalog.count(*) = 1
+          AND pg_catalog.bool_and(workspace_id = '00000000-0000-4000-8000-000000000011')
+        FROM public.scoring_models
+        WHERE id = (SELECT model_id FROM phase6_models WHERE label = 'threshold')$sql$
+);
+
+SELECT pg_temp.phase6_expect_true(
+  'every stored analysis of the first project names the first project',
+  $sql$SELECT pg_catalog.count(*) >= 11
+          AND pg_catalog.bool_and(
+                entry.analysis -> 'analysis' ->> 'project_id' = '00000000-0000-4000-8000-000000000021'
+              )
+        FROM public.list_location_analyses(
+               '00000000-0000-4000-8000-000000000011',
+               '00000000-0000-4000-8000-000000000021',
+               NULL,
+               50
+             ) AS entry$sql$
+);
+
+SELECT pg_temp.phase6_expect_true(
+  'the second project lists only its own stored analysis',
+  $sql$SELECT pg_catalog.count(*) >= 1
+          AND pg_catalog.bool_and(
+                entry.analysis -> 'analysis' ->> 'project_id' = '00000000-0000-4000-8000-000000000022'
+              )
+        FROM public.list_location_analyses(
+               '00000000-0000-4000-8000-000000000011',
+               '00000000-0000-4000-8000-000000000022',
+               NULL,
+               50
+             ) AS entry$sql$
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'history of a foreign project is refused instead of returning an empty list',
+  $sql$SELECT stored.analysis FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020',
+    NULL,
+    5
+  ) AS stored$sql$,
+  'P0002'
 );
 
 DO $phase6_engine_summary$

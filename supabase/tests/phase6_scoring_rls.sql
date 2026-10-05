@@ -540,6 +540,26 @@ SELECT pg_temp.p6rls_expect_error(
 SET LOCAL request.jwt.claims = '{"sub":"a1000000-0000-4000-8000-000000000001","role":"authenticated"}';
 
 SELECT pg_temp.p6rls_expect_error(
+  'a project query against another workspace is refused before any project lookup',
+  $sql$SELECT candidate.id FROM public.list_analysis_locations(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021'
+  ) AS candidate$sql$,
+  '42501'
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'and the same refusal applies to stored history of another workspace',
+  $sql$SELECT stored.analysis FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021',
+    NULL,
+    5
+  ) AS stored$sql$,
+  '42501'
+);
+
+SELECT pg_temp.p6rls_expect_error(
   'a model cannot be re-pointed at another workspace',
   $sql$UPDATE public.scoring_models
           SET workspace_id = '00000000-0000-4000-8000-000000000011'
@@ -696,6 +716,35 @@ SELECT pg_temp.p6rls_expect_error(
 );
 
 SELECT pg_temp.p6rls_expect_error(
+  'a member asking for another workspace project gets a refusal, not an empty list',
+  $sql$SELECT candidate.id FROM public.list_analysis_locations(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020'
+  ) AS candidate$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'and the same refusal applies to stored history',
+  $sql$SELECT stored.analysis FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020',
+    NULL,
+    5
+  ) AS stored$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'a project that does not exist answers exactly like a foreign one',
+  $sql$SELECT candidate.id FROM public.list_analysis_locations(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-0000000000ff'
+  ) AS candidate$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.p6rls_expect_error(
   'a foreign project id is refused inside the own workspace',
   $sql$SELECT public.run_location_analysis(
     '00000000-0000-4000-8000-000000000011',
@@ -708,6 +757,40 @@ SELECT pg_temp.p6rls_expect_error(
 
 SET LOCAL ROLE authenticated;
 SET LOCAL request.jwt.claims = '{"sub":"b1000000-0000-4000-8000-000000000001","role":"authenticated"}';
+
+SELECT pg_temp.p6rls_expect_error(
+  'a member querying a project of another workspace gets a refusal, not an empty list',
+  $sql$SELECT candidate.id FROM public.list_analysis_locations(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020'
+  ) AS candidate$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'and the same refusal applies to stored history',
+  $sql$SELECT stored.analysis FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020',
+    NULL,
+    5
+  ) AS stored$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'a comparison cannot mix a candidate of this project with one of another workspace',
+  $sql$SELECT public.run_location_analysis(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021',
+    ARRAY[
+      '00000000-0000-4000-8000-000000000071'::uuid,
+      '00000000-0000-4000-8000-000000000050'::uuid
+    ],
+    1000, (SELECT model_id FROM p6rls_probe WHERE label = 'isolation'), 'comparison'
+  )$sql$,
+  'P0002'
+);
 
 SELECT pg_temp.p6rls_expect_error(
   'a foreign candidate id is refused',

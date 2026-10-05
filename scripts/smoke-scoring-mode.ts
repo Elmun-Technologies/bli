@@ -26,14 +26,19 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { SAFE_AUTH_MESSAGES } from '@/lib/auth/messages';
 import {
+  createWorkspaceProject,
   getScoringModel,
   getStoredAnalysis,
   listSavedCandidates,
   listScoringModels,
+  listStoredAnalyses,
+  listWorkspaceProjects,
   runAnalysis,
   saveCandidate,
+  ScoringApiError,
   updateScoringModel,
 } from '@/lib/scoring/client';
+import { PROJECT_REQUIRED_MESSAGE } from '@/lib/scoring/projects';
 import { findMetric } from '@/lib/scoring/catalogue';
 import { buildComparisonCsv, comparisonCsvFilename } from '@/lib/scoring/export';
 import { parseScoringAnalysis } from '@/lib/scoring/payload';
@@ -227,16 +232,51 @@ async function main() {
     );
     assert(model.version >= 1, `a saved model has a revision, got ${model.version}`);
 
-    note('2. Saved candidate locations are listed for the workspace project.');
-    const candidatesResponse = await listSavedCandidates(WORKSPACE_A);
+    note('2. Saved candidate locations are listed for one explicitly named project.');
+    // Phase 6.5: the projects are read first and every request names one. The
+    // seeded candidates belong to the seeded project; on a repeated run the
+    // smoke's own extra project also exists, so the project is identified by
+    // asking each one explicitly through the shipped, project-scoped endpoint.
+    const projectsAtStart = await listWorkspaceProjects(WORKSPACE_A);
+    assert(projectsAtStart.length >= 1, 'the seeded workspace must hold at least one project');
+
+    const projectLists: Awaited<ReturnType<typeof listSavedCandidates>>[] = [];
+    for (const project of projectsAtStart) {
+      const list = await listSavedCandidates(WORKSPACE_A, project.id);
+      assert(
+        list.projectId === project.id,
+        `the server must answer for the project that was named, got ${list.projectId}`,
+      );
+      assert(
+        list.projects.length === projectsAtStart.length,
+        'the response must list every selectable project',
+      );
+      projectLists.push(list);
+    }
+
+    const candidatesResponse = projectLists.find((list) => list.candidates.length >= 3);
     assert(
-      candidatesResponse.projectId.length === 36,
-      'the server must resolve the workspace project for the client',
+      candidatesResponse,
+      `expected the seeded saved candidates in one of the workspace projects, got ${projectLists
+        .map((list) => list.candidates.length)
+        .join(', ')}`,
     );
+    const projectAId = candidatesResponse.projectId;
     assert(
-      candidatesResponse.candidates.length >= 3,
-      `expected the seeded saved candidates, got ${candidatesResponse.candidates.length}`,
+      projectAId !== null && projectAId.length === 36,
+      'the server must echo the project that answered',
     );
+
+    if (projectsAtStart.length === 1) {
+      // The convenience path is only unambiguous while one project exists; it
+      // still reports the project it used, so nothing is chosen invisibly.
+      const convenience = await listSavedCandidates(WORKSPACE_A, null);
+      assert(
+        convenience.projectId === projectsAtStart[0].id,
+        'a single project is selected automatically and named in the response',
+      );
+    }
+
     assert(
       candidatesResponse.candidates.every(
         (candidate) =>
@@ -256,7 +296,7 @@ async function main() {
     const saveName = `Smoke site ${process.pid}`;
     activeJar = analystJar;
     const savedCandidate = await saveCandidate(WORKSPACE_A, {
-      projectId: candidatesResponse.projectId,
+      projectId: projectAId,
       name: saveName,
       longitude: 69.2797,
       latitude: 41.3111,
@@ -268,7 +308,7 @@ async function main() {
         Math.abs(savedCandidate.latitude - 41.3111) < 1e-9,
       'the stored coordinate pair must be the one that was sent',
     );
-    const afterSave = await listSavedCandidates(WORKSPACE_A, candidatesResponse.projectId);
+    const afterSave = await listSavedCandidates(WORKSPACE_A, projectAId);
     assert(
       afterSave.candidates.some((candidate) => candidate.id === savedCandidate.id),
       'the saved candidate must appear in the project list',
@@ -277,7 +317,7 @@ async function main() {
 
     note('3. A single analysis runs through the shipped endpoint and the shipped parser.');
     const analysis = await runAnalysis(WORKSPACE_A, {
-      projectId: candidatesResponse.projectId,
+      projectId: projectAId,
       candidateIds: [firstCandidate.id],
       radiusMeters: 500,
       scoringModelId: model.id,
@@ -304,7 +344,7 @@ async function main() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: candidatesResponse.projectId,
+          projectId: projectAId,
           candidateIds: [firstCandidate.id],
           radiusMeters: 500,
           scoringModelId: model.id,
@@ -381,7 +421,7 @@ async function main() {
 
     note('7. Repeating the same analysis returns the identical numbers.');
     const repeated = await runAnalysis(WORKSPACE_A, {
-      projectId: candidatesResponse.projectId,
+      projectId: projectAId,
       candidateIds: [firstCandidate.id],
       radiusMeters: 500,
       scoringModelId: model.id,
@@ -395,7 +435,7 @@ async function main() {
 
     note('8. A comparison of three saved sites is stored and labelled A..E in rank order.');
     const comparison = await runAnalysis(WORKSPACE_A, {
-      projectId: candidatesResponse.projectId,
+      projectId: projectAId,
       candidateIds: [firstCandidate.id, secondCandidate.id, thirdCandidate.id],
       radiusMeters: 1_000,
       scoringModelId: model.id,
@@ -466,7 +506,7 @@ async function main() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: candidatesResponse.projectId,
+          projectId: projectAId,
           candidateIds: six,
           radiusMeters: 1_000,
           scoringModelId: model.id,
@@ -484,7 +524,7 @@ async function main() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: candidatesResponse.projectId,
+          projectId: projectAId,
           candidateIds: [firstCandidate.id],
           radiusMeters: 1_000,
           scoringModelId: model.id,
@@ -500,7 +540,7 @@ async function main() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: candidatesResponse.projectId,
+          projectId: projectAId,
           candidateIds: [firstCandidate.id, secondCandidate.id],
           radiusMeters: 1_000,
           scoringModelId: model.id,
@@ -516,7 +556,7 @@ async function main() {
     note('13. An analyst can run an analysis but cannot edit the model.');
     activeJar = analystJar;
     const analystRun = await runAnalysis(WORKSPACE_A, {
-      projectId: candidatesResponse.projectId,
+      projectId: projectAId,
       candidateIds: [secondCandidate.id],
       radiusMeters: 1_000,
       scoringModelId: model.id,
@@ -553,7 +593,7 @@ async function main() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: candidatesResponse.projectId,
+          projectId: projectAId,
           candidateIds: [firstCandidate.id],
           radiusMeters: 500,
           scoringModelId: model.id,
@@ -590,7 +630,7 @@ async function main() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: candidatesResponse.projectId,
+          projectId: projectAId,
           candidateIds: [firstCandidate.id],
           radiusMeters: 500,
           scoringModelId: model.id,
@@ -614,7 +654,7 @@ async function main() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          projectId: candidatesResponse.projectId,
+          projectId: projectAId,
           name: 'Outsider candidate',
           longitude: 69.28,
           latitude: 41.31,
@@ -669,7 +709,7 @@ async function main() {
 
     note('17. A fresh run uses the edited definition and records the new revision.');
     const rescored = await runAnalysis(WORKSPACE_A, {
-      projectId: candidatesResponse.projectId,
+      projectId: projectAId,
       candidateIds: [firstCandidate.id],
       radiusMeters: 500,
       scoringModelId: model.id,
@@ -709,7 +749,7 @@ async function main() {
       'the original weights must be back',
     );
     const restoredRun = await runAnalysis(WORKSPACE_A, {
-      projectId: candidatesResponse.projectId,
+      projectId: projectAId,
       candidateIds: [firstCandidate.id],
       radiusMeters: 500,
       scoringModelId: model.id,
@@ -751,6 +791,210 @@ async function main() {
       }
       assert(Number.isFinite(Number(metrics.customersRevenueTotal)), 'revenue must stay numeric');
     }
+
+    note('21. A project is created explicitly, and only an owner or admin may create one.');
+    const viewerCreate = await request(
+      `/api/workspaces/${WORKSPACE_A}/projects`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Viewer project' }),
+      },
+      viewerJar,
+    );
+    assert(viewerCreate.status === 403, `a viewer must not create a project, got ${viewerCreate.status}`);
+    const analystCreate = await request(
+      `/api/workspaces/${WORKSPACE_A}/projects`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Analyst project' }),
+      },
+      analystJar,
+    );
+    assert(analystCreate.status === 403, `an analyst must not create a project, got ${analystCreate.status}`);
+    const foreignCreate = await request(
+      `/api/workspaces/${WORKSPACE_A}/projects`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Foreign project' }),
+      },
+      foreignOwnerJar,
+    );
+    assert(foreignCreate.status === 403, `a foreign owner must not create a project, got ${foreignCreate.status}`);
+
+    activeJar = ownerJar;
+    const projectBName = `Smoke project B ${process.pid}`;
+    const projectB = await createWorkspaceProject(WORKSPACE_A, { name: projectBName });
+    assert(projectB.id.length === 36, 'creating a project must return its id');
+    assert(projectB.name === projectBName && projectB.status === 'active', 'the project must be stored as created');
+    const projectsAfterCreate = await listWorkspaceProjects(WORKSPACE_A);
+    assert(
+      projectsAfterCreate.length === projectsAtStart.length + 1 &&
+        projectsAfterCreate.some((project) => project.id === projectB.id),
+      'exactly the created project must be added to the selector list',
+    );
+
+    note('22. With several projects an unnamed request is refused, and a foreign project fails identically.');
+    const unnamed = await request(`/api/workspaces/${WORKSPACE_A}/candidates`, {}, ownerJar);
+    assert(
+      unnamed.status === 400,
+      `an unnamed project in a multi-project workspace must be 400, got ${unnamed.status}`,
+    );
+    const unnamedError = await readError(unnamed);
+    assert(unnamedError.code === 'project_required', `unexpected code ${unnamedError.code}`);
+    assert(
+      unnamedError.message === PROJECT_REQUIRED_MESSAGE,
+      `the refusal must use the documented safe message, got ${unnamedError.message}`,
+    );
+
+    // A project of the *other* workspace and a project that does not exist must
+    // fail exactly like the missing project id: one response, no oracle.
+    const foreignProjectId = '00000000-0000-4000-8000-000000000021';
+    const missingProjectId = '00000000-0000-4000-8000-0000000000ff';
+    for (const [label, projectId] of [
+      ['a project of another workspace', foreignProjectId],
+      ['a project that does not exist', missingProjectId],
+    ] as const) {
+      const read = await request(
+        `/api/workspaces/${WORKSPACE_A}/candidates?projectId=${projectId}`,
+        {},
+        ownerJar,
+      );
+      assert(read.status === 400, `${label} must be refused with 400, got ${read.status}`);
+      assert(
+        JSON.stringify(await readError(read)) === JSON.stringify(unnamedError),
+        `${label} must fail identically to a missing project id`,
+      );
+
+      const save = await request(
+        `/api/workspaces/${WORKSPACE_A}/candidates`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, name: 'Foreign site', longitude: 69.28, latitude: 41.31 }),
+        },
+        ownerJar,
+      );
+      assert(save.status === 400, `${label} must be refused for saving with 400, got ${save.status}`);
+      assert(
+        JSON.stringify(await readError(save)) === JSON.stringify(unnamedError),
+        `${label} must fail identically on the save path`,
+      );
+    }
+
+    const foreignRun = await runAnalysis(WORKSPACE_A, {
+      projectId: foreignProjectId,
+      candidateIds: [firstCandidate.id],
+      radiusMeters: 500,
+      scoringModelId: model.id,
+      mode: 'analysis',
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert(foreignRun instanceof ScoringApiError, 'an analysis with a foreign project must be refused');
+    assert(
+      foreignRun.status === 400 && foreignRun.code === 'project_required',
+      `a foreign project must fail identically to a missing one, got ${foreignRun.status} ${foreignRun.code}`,
+    );
+    assert(
+      foreignRun.message === PROJECT_REQUIRED_MESSAGE,
+      'the refusal must never reveal whether the foreign project exists',
+    );
+
+    note('23. A saved candidate belongs to its project: switching projects hides the other project sites.');
+    const listB = await listSavedCandidates(WORKSPACE_A, projectB.id);
+    assert(listB.projectId === projectB.id && listB.candidates.length === 0, 'a new project starts empty');
+    const savedB = await saveCandidate(WORKSPACE_A, {
+      projectId: projectB.id,
+      name: `Smoke B site ${process.pid}`,
+      longitude: 69.335,
+      latitude: 41.285,
+    });
+    const listBAfter = await listSavedCandidates(WORKSPACE_A, projectB.id);
+    assert(
+      listBAfter.candidates.some((candidate) => candidate.id === savedB.id),
+      'the site saved in project B must appear in project B',
+    );
+    assert(
+      !listBAfter.candidates.some((candidate) => candidate.id === savedCandidate.id),
+      'a candidate of project A must never appear in project B',
+    );
+    const listAAfter = await listSavedCandidates(WORKSPACE_A, projectAId);
+    assert(
+      listAAfter.candidates.some((candidate) => candidate.id === savedCandidate.id),
+      'switching back to project A must show project A sites again',
+    );
+    assert(
+      !listAAfter.candidates.some((candidate) => candidate.id === savedB.id),
+      'a candidate of project B must never appear in project A',
+    );
+
+    note('24. A comparison may not mix projects, and the model stays workspace-owned.');
+    const mixed = await runAnalysis(WORKSPACE_A, {
+      projectId: projectB.id,
+      candidateIds: [savedB.id, savedCandidate.id],
+      radiusMeters: 500,
+      scoringModelId: model.id,
+      mode: 'comparison',
+    }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert(mixed instanceof ScoringApiError, 'a comparison mixing two projects must be refused');
+    assert(
+      mixed.status === 400 || mixed.status === 404,
+      `a mixed-project comparison must be refused safely, got ${mixed.status}`,
+    );
+    assert(
+      !/policy|sql|relation|constraint/i.test(mixed.message),
+      'the refusal must not leak schema or policy details',
+    );
+
+    const inB = await runAnalysis(WORKSPACE_A, {
+      projectId: projectB.id,
+      candidateIds: [savedB.id],
+      radiusMeters: 500,
+      scoringModelId: model.id,
+      mode: 'analysis',
+    });
+    assert(
+      inB.analysis.projectId === projectB.id && inB.results[0]?.candidateId === savedB.id,
+      'the same workspace model must score a candidate of the second project',
+    );
+
+    const historyB = await listStoredAnalyses(WORKSPACE_A, projectB.id, { limit: 50 });
+    assert(
+      historyB.analyses.length === 1 &&
+        historyB.analyses.every((entry) => entry.analysis.projectId === projectB.id),
+      `project B history must hold only its own analysis, got ${historyB.analyses.length}`,
+    );
+    const historyA = await listStoredAnalyses(WORKSPACE_A, projectAId, { limit: 50 });
+    assert(
+      historyA.analyses.some((entry) => entry.analysis.id === analysis.analysis.id),
+      'switching back must still find the original analysis of project A',
+    );
+    assert(
+      historyA.analyses.every(
+        (entry) =>
+          entry.analysis.projectId === projectAId &&
+          entry.results.every((result) => result.candidateId !== savedB.id),
+      ),
+      'project A history must never contain a result of project B',
+    );
+    assert(
+      !historyB.analyses.some((entry) => entry.analysis.id === analysis.analysis.id),
+      'a stored analysis may not appear in two projects',
+    );
+
+    const modelsAfterProjects = await listScoringModels(WORKSPACE_A);
+    assert(
+      modelsAfterProjects.length === models.length &&
+        modelsAfterProjects.some((entry) => entry.id === model.id),
+      'projects must not duplicate or fork the workspace scoring models',
+    );
 
     console.log('scoring smoke passed');
   } catch (error) {

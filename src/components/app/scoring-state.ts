@@ -57,6 +57,27 @@ export function toggleCandidateSelection(
   return [...current, candidateId];
 }
 
+/**
+ * The project-scope rule for selections. A saved candidate id and a comparison
+ * set belong to the project they were loaded from, so a switch keeps only ids
+ * that the newly selected project actually contains. Called with an empty list
+ * it clears everything, which is exactly what happens before the new project's
+ * data arrives.
+ */
+export function retainProjectScopedSelection(
+  selection: { selectedCandidateId: string | null; compareIds: readonly string[] },
+  candidates: readonly { id: string }[],
+): { selectedCandidateId: string | null; compareIds: string[] } {
+  const selectable = new Set(candidates.map((candidate) => candidate.id));
+  return {
+    selectedCandidateId:
+      selection.selectedCandidateId && selectable.has(selection.selectedCandidateId)
+        ? selection.selectedCandidateId
+        : null,
+    compareIds: selection.compareIds.filter((id) => selectable.has(id)),
+  };
+}
+
 export function selectionMessage(count: number): string {
   if (count === 0) return 'Select two to five saved sites.';
   if (count === 1) return 'Select one more site to compare.';

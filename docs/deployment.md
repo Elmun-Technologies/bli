@@ -25,6 +25,13 @@ deploying it:
    and the membership/role assertion before any write, and re-run the scoring suites.
 7. There is no scoring job, queue or background worker: every analysis is an explicit user action and
    every endpoint is `dynamic`/`no-store`.
+8. **Phase 6.5 project context:** apply `20261005093000_phase65_project_context.sql` (it replaces two
+   RPC bodies, so no data migration is required) and re-run both scoring suites. Check that every
+   workspace you deploy to has at least one **active** project: the interface shows the "No project is
+   available…" empty state and refuses project-scoped mutations in a workspace with none, and with
+   two or more projects it will not pick one for the user. Client code from before Phase 6.5 that
+   omits `projectId` on a multi-project workspace now gets a `400 project_required` instead of an
+   implicit (oldest-project) answer — update such callers before deploying.
 
 ## Phase 5 deployment gate
 

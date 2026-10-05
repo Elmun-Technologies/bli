@@ -7,8 +7,15 @@ import {
   parseScoringAnalysis,
   parseScoringModel,
   parseStoredAnalysisList,
+  parseWorkspaceProject,
   type CandidateListResponse,
 } from './payload';
+import {
+  NO_PROJECT_MESSAGE,
+  PROJECT_REQUIRED_MESSAGE,
+  resolveProjectContext,
+  type WorkspaceProjectSummary,
+} from './projects';
 import type {
   SavedCandidate,
   ScoringMode,
@@ -309,37 +316,139 @@ async function readModelWithClient(
 }
 
 /**
- * The workspace project that holds saved candidate locations. A workspace can
- * hold several projects; the interface works with the oldest one, and the
- * workspace id is always taken from the caller's resolved membership.
+ * The active projects of the caller's own workspace, ordered for display only.
+ * RLS filters the rows to the caller's memberships; the order is never used to
+ * pick a project, because Phase 6.5 has no implicit project selection at all.
  */
-async function resolveWorkspaceProjectId(
+async function readWorkspaceProjects(
   client: ServerClient,
   workspaceId: string,
   scope: string,
-): Promise<string> {
+): Promise<WorkspaceProjectSummary[]> {
   const { data, error } = await client
     .from('projects')
-    .select('id')
+    .select('id, name, status')
     .eq('workspace_id', workspaceId)
+    .eq('status', 'active')
     .order('created_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .order('id', { ascending: true });
 
   if (error) throwForPostgrestError(scope, 'read', error);
-  if (!data) {
-    throw new ScoringNotFoundError('This workspace has no project for saved locations yet.');
-  }
-  return data.id;
+  return (data ?? []) as WorkspaceProjectSummary[];
 }
 
+/**
+ * Project context of a read. One project resolves on its own; several projects
+ * require the caller to name one; a named project that is not one of the
+ * caller's own projects fails exactly like a missing one (safe 400, no
+ * resource-existence oracle). The zero-project state is the only empty answer.
+ */
+async function resolveProjectForRead(
+  client: ServerClient,
+  workspaceId: string,
+  requestedProjectId: string | null,
+  scope: string,
+): Promise<{ projects: WorkspaceProjectSummary[]; projectId: string | null }> {
+  const projects = await readWorkspaceProjects(client, workspaceId, scope);
+  const resolution = resolveProjectContext(projects, requestedProjectId);
+
+  if (resolution.status === 'resolved') return { projects, projectId: resolution.projectId };
+  if (resolution.status === 'empty') return { projects, projectId: null };
+
+  throw new ScoringRequestError('project_required', PROJECT_REQUIRED_MESSAGE);
+}
+
+/**
+ * Project context of a mutation or a project-scoped write: the project is always
+ * named (or unambiguously resolved) and always verified against the caller's own
+ * workspace before the database is asked to do anything.
+ */
+async function requireProjectForWrite(
+  client: ServerClient,
+  workspaceId: string,
+  requestedProjectId: string | null,
+  scope: string,
+): Promise<string> {
+  const projects = await readWorkspaceProjects(client, workspaceId, scope);
+  const resolution = resolveProjectContext(projects, requestedProjectId);
+
+  if (resolution.status === 'resolved') return resolution.projectId;
+  if (resolution.status === 'empty') throw new ScoringRequestError('no_project', NO_PROJECT_MESSAGE);
+
+  throw new ScoringRequestError('project_required', PROJECT_REQUIRED_MESSAGE);
+}
+
+/** The caller's own projects, for the explicit project selector. */
+export async function listWorkspaceProjects(
+  workspaceId: string,
+): Promise<WorkspaceProjectSummary[]> {
+  return withAuthenticatedClient('scoring.projects.list', (client) =>
+    readWorkspaceProjects(client, workspaceId, 'scoring.projects.list'),
+  );
+}
+
+/**
+ * Creates one project explicitly. Nothing in the server ever creates a project
+ * on its own: this runs only for a request that named it, under the caller's own
+ * session, and the database policy keeps it to owners and admins.
+ */
+export async function createWorkspaceProject(
+  workspaceId: string,
+  input: { name: string; description: string | null },
+): Promise<WorkspaceProjectSummary> {
+  return withAuthenticatedClient('scoring.projects.create', async (client) => {
+    const { data, error } = await client
+      .from('projects')
+      .insert({
+        workspace_id: workspaceId,
+        name: input.name,
+        description: input.description,
+        status: 'active',
+      })
+      .select('id, name, status')
+      .single();
+
+    if (error) {
+      // The route guard and the policy both keep this to owners/admins; keep the
+      // refusal message truthful for projects rather than reusing the model one.
+      if (error.code === '42501') {
+        throw new ScoringAccessError('Your role in this workspace cannot create a project.');
+      }
+      if (error.code === '23514') {
+        throw new ScoringRequestError('invalid_project', 'The project name is not valid.');
+      }
+      throwForPostgrestError('scoring.projects.create', 'manage', error);
+    }
+    try {
+      return parseWorkspaceProject(data);
+    } catch (cause) {
+      throw new ScoringQueryError('scoring.projects.create returned an unreadable project.', {
+        cause,
+      });
+    }
+  });
+}
+
+/**
+ * Saved candidates of one project, read by the caller's own session. The
+ * response names the projects the caller may choose from and the project that
+ * answered, so the interface never has to invent an identifier.
+ */
 export async function listSavedCandidates(
   workspaceId: string,
-  projectId?: string | null,
+  projectId: string | null,
 ): Promise<CandidateListResponse> {
   return withAuthenticatedClient('scoring.candidates.list', async (client) => {
-    const resolvedProjectId =
-      projectId ?? (await resolveWorkspaceProjectId(client, workspaceId, 'scoring.candidates.list'));
+    const { projects, projectId: resolvedProjectId } = await resolveProjectForRead(
+      client,
+      workspaceId,
+      projectId,
+      'scoring.candidates.list',
+    );
+
+    if (resolvedProjectId === null) {
+      return { projects, projectId: null, candidates: [] };
+    }
 
     const { data, error } = await client.rpc('list_analysis_locations', {
       p_workspace_id: workspaceId,
@@ -348,6 +457,7 @@ export async function listSavedCandidates(
 
     if (error) throwForPostgrestError('scoring.candidates.list', 'read', error);
     return {
+      projects,
       projectId: resolvedProjectId,
       candidates: parseSavedCandidateList({ candidates: data ?? [] }),
     };
@@ -359,6 +469,8 @@ export async function saveCandidate(
   input: { projectId: string; name: string; longitude: number; latitude: number },
 ): Promise<SavedCandidate> {
   return withAuthenticatedClient('scoring.candidates.save', async (client) => {
+    await requireProjectForWrite(client, workspaceId, input.projectId, 'scoring.candidates.save');
+
     const { data, error } = await client.rpc('save_analysis_location', {
       p_workspace_id: workspaceId,
       p_project_id: input.projectId,
@@ -409,6 +521,11 @@ export async function runScoringAnalysis(
   request: ScoringRunRequest,
 ): Promise<ScoringWirePayload> {
   return withAuthenticatedClient('scoring.analyses.run', async (client) => {
+    // The project is verified as the caller's own before the engine runs; the
+    // engine then refuses any candidate that does not belong to that project, so
+    // a mixed-project comparison can never be stored.
+    await requireProjectForWrite(client, workspaceId, request.projectId, 'scoring.analyses.run');
+
     const { data, error } = await client.rpc('run_location_analysis', {
       p_workspace_id: workspaceId,
       p_project_id: request.projectId,
@@ -452,13 +569,19 @@ export async function getStoredAnalysis(
  */
 export async function listStoredAnalyses(
   workspaceId: string,
-  projectId?: string | null,
+  projectId: string | null,
   mode: ScoringMode | null = null,
   limit = 20,
-): Promise<{ projectId: string; analyses: ScoringWirePayload[] }> {
+): Promise<{ projectId: string | null; analyses: ScoringWirePayload[] }> {
   return withAuthenticatedClient('scoring.analyses.list', async (client) => {
-    const resolvedProjectId =
-      projectId ?? (await resolveWorkspaceProjectId(client, workspaceId, 'scoring.analyses.list'));
+    const { projectId: resolvedProjectId } = await resolveProjectForRead(
+      client,
+      workspaceId,
+      projectId,
+      'scoring.analyses.list',
+    );
+
+    if (resolvedProjectId === null) return { projectId: null, analyses: [] };
 
     const { data, error } = await client.rpc('list_location_analyses', {
       p_workspace_id: workspaceId,

@@ -2556,6 +2556,52 @@ input:focus-visible {
   letter-spacing: -0.02em;
 }
 
+/* Project context (Phase 6.5): one explicit project for the whole section. */
+.locations-project {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 16px;
+  padding: 11px 14px;
+  border: 1px solid #dbe6ef;
+  border-radius: 8px;
+  background: #f7fafc;
+}
+
+.locations-project__field {
+  display: flex;
+  min-width: 240px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.locations-project__field select {
+  padding: 7px 9px;
+  border: 1px solid #dde4e9;
+  border-radius: 6px;
+  color: #33465c;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.locations-project__note {
+  margin: 0 0 2px;
+  color: #74828f;
+  font-size: 11px;
+}
+
+.locations-project--empty {
+  align-items: center;
+}
+
+.locations-project--empty .scoring-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
 .locations-tabs {
   display: flex;
   flex-wrap: wrap;

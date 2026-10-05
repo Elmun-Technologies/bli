@@ -21,10 +21,21 @@ const ROLE_LABELS: Record<string, string> = {
 
 interface WorkspacePageProps {
   params: Promise<{ workspaceId: string }>;
+  searchParams: Promise<{ project?: string | string[] }>;
 }
 
-export default async function WorkspacePage({ params }: WorkspacePageProps) {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export default async function WorkspacePage({ params, searchParams }: WorkspacePageProps) {
   const { workspaceId } = await params;
+  const query = await searchParams;
+  // The project in the URL is a deep link, never an authorization claim: the API
+  // verifies every project against the caller's own memberships.
+  const requestedProject = Array.isArray(query.project) ? query.project[0] : query.project;
+  const initialProjectId =
+    typeof requestedProject === 'string' && UUID_PATTERN.test(requestedProject)
+      ? requestedProject
+      : null;
   const user = await requireSessionUser(`/workspaces/${workspaceId}`);
 
   // The workspace id comes from the URL and is untrusted input: membership is
@@ -61,6 +72,7 @@ export default async function WorkspacePage({ params }: WorkspacePageProps) {
 
       <AppShell
         dataSource={resolveDataSourceMode()}
+        initialProjectId={initialProjectId}
         workspaceId={workspace.id}
         workspaceRole={workspace.role}
       />

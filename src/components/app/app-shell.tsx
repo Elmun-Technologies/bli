@@ -57,12 +57,18 @@ export function AppShell({
   dataSource,
   workspaceId,
   workspaceRole,
+  initialProjectId = null,
 }: {
   dataSource: DataSourceMode;
   /** Present only on the authenticated tenant route; absent for the public demo. */
   workspaceId?: string;
   /** The caller's server-resolved role, used only to shape the UI. */
   workspaceRole?: string;
+  /**
+   * `?project=` from the page URL. The panel treats it as a deep link only; the
+   * server still verifies the project against the caller's memberships.
+   */
+  initialProjectId?: string | null;
 }) {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('Map');
   const [visibleLayers, setVisibleLayers] = useState<MapLayerId[]>([...MAP_LAYER_IDS]);
@@ -247,6 +253,7 @@ export function AppShell({
           <LocationsPanel
             dataSource={dataSource}
             focusedCandidateId={focusedScoringCandidateId}
+            initialProjectId={initialProjectId}
             onFocusedCandidateHandled={handleFocusedCandidateHandled}
             onOpenMap={() => setActiveSection('Map')}
             onShowOnMap={handleShowScoringOnMap}

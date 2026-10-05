@@ -1,4 +1,4 @@
-# Location scoring — Phase 6
+# Location scoring — Phase 6 (project context corrected in Phase 6.5)
 
 The scoring engine answers one question with measurements, not with a model's opinion:
 *for a saved candidate location and a chosen radius, which comparable business metrics does the
@@ -192,6 +192,7 @@ lookup is needed to explain an old score.
 | Run an analysis / comparison | no | yes | yes | yes |
 | Save a candidate location | no | yes | yes | yes |
 | Create or edit a scoring model | no | no | yes | yes |
+| Create a project | no | no | yes | yes |
 
 RLS is enabled on all four Phase 6 tables with per-table policies: reads require membership of the
 row's workspace; factor rows additionally require membership of the owning model's workspace; all
@@ -204,6 +205,35 @@ project id, a foreign candidate, a foreign analysis and a foreign factor write a
 No `service_role` is used anywhere in the scoring path: the RPCs are `SECURITY INVOKER`, assert
 membership themselves and run under the caller's own JWT.
 
+### Project context (Phase 6.5)
+
+Saved candidates, analyses and comparisons are **project-scoped**, and the project is always explicit:
+
+* the server never selects a project by row order — there is no "oldest project" or "first project"
+  rule anywhere, in SQL or in TypeScript;
+* a request that names a project is checked against the caller's own workspace projects before
+  anything else happens; a project of another workspace, a project that does not exist and a project
+  the caller cannot see all produce the *same* refusal, so no endpoint is an existence oracle;
+* with more than one active project, an unnamed project is refused with `400`
+  (`project_required`, "Select a project in this workspace before continuing.") instead of being
+  guessed;
+* with exactly one active project, a read without a project id resolves it unambiguously and always
+  reports the id it used in the response, so even the convenience path is never silent;
+* with zero active projects the read answers `200` with `projectId: null` and an empty list (the
+  interface shows the documented empty state); a mutation answers `400` (`no_project`) with
+  "No project is available. Create or select a project before running location analysis.";
+* creating a project is always an explicit user action (owner/admin, through the project endpoint,
+  under their own session and the `projects_insert_owner_admin` policy). Nothing creates a project
+  automatically;
+* the engine itself re-verifies: `run_location_analysis` refuses any candidate that does not belong to
+  the named project, so a comparison mixing two projects cannot be stored even if it bypassed the
+  route; `save_analysis_location` and the two list functions verify the project too (`P0002` for a
+  project of another workspace, `42501` when the caller is not a member of the workspace at all).
+
+Scoring models are **workspace-owned**: a project selects from the workspace's models, and creating a
+project never copies or forks a model. Unlike candidates and analyses, models are deliberately not
+project-scoped.
+
 ## 9. API contracts
 
 | Method and path | Purpose | Notes |
@@ -212,23 +242,41 @@ membership themselves and run under the caller's own JWT.
 | `POST /api/workspaces/{workspaceId}/scoring-models` | Create a model | owner/admin |
 | `GET /api/workspaces/{workspaceId}/scoring-models/{modelId}` | One model with its factors | Any member |
 | `PATCH /api/workspaces/{workspaceId}/scoring-models/{modelId}` | Replace a model definition | owner/admin |
-| `GET /api/workspaces/{workspaceId}/candidates?projectId=` | Saved candidates (project optional; the server resolves the workspace project when it is omitted) | Any member |
-| `POST /api/workspaces/{workspaceId}/candidates` | Save one candidate location | owner/admin/analyst |
-| `GET /api/workspaces/{workspaceId}/analyses?projectId=&mode=&limit=` | Stored analyses, newest first, `limit` 1–50 | Any member |
+| `GET /api/workspaces/{workspaceId}/projects` | The caller's own projects, for the explicit selector | Any member |
+| `POST /api/workspaces/{workspaceId}/projects` | Create one project explicitly | owner/admin |
+| `GET /api/workspaces/{workspaceId}/candidates?projectId=` | Saved candidates of one project; the response also lists the selectable projects and the project that answered | Any member |
+| `POST /api/workspaces/{workspaceId}/candidates` | Save one candidate location (body requires `projectId`) | owner/admin/analyst |
+| `GET /api/workspaces/{workspaceId}/analyses?projectId=&mode=&limit=` | Stored analyses of one project, newest first, `limit` 1–50 | Any member |
 | `POST /api/workspaces/{workspaceId}/analyses` | Run and store one analysis (exactly one candidate) | owner/admin/analyst |
 | `GET /api/workspaces/{workspaceId}/analyses/{analysisId}` | Read one stored analysis exactly as written | Any member |
 | `POST /api/workspaces/{workspaceId}/comparisons` | Run and store a comparison of 2–5 candidates | owner/admin/analyst |
 
 Errors are `{ "error": { "code", "message" } }` with safe messages only:
 `invalid_request`, `invalid_model`, `duplicate_model`, `invalid_candidate`, `invalid_selection`,
-`not_found`, `session_expired`, `workspace_forbidden`, `database_unavailable`, `internal_error`.
+`project_required`, `no_project`, `not_found`, `session_expired`, `workspace_forbidden`,
+`database_unavailable`, `internal_error`.
 No SQL, no policy name, no schema name and no database message ever reaches a client, and a foreign
 resource answers exactly like a missing one. There is no generic "score anything" endpoint: every
 route takes an explicit project, candidate list, radius and model, and validates all of them.
 
+The candidate response envelope is
+`{ "projects": [{ "id", "name", "status" }], "projectId": "<uuid or null>", "candidates": [...] }`,
+and the analysis list envelope is `{ "projectId": "<uuid or null>", "analyses": [...] }`. `projectId`
+is `null` only for the zero-project empty state. A missing project id in a multi-project workspace and
+a project id the caller may not use produce the same `400 project_required` body, byte for byte.
+
 ## 10. Interface
 
 A new **Locations** section with three tabs:
+
+A **project selector** sits at the top of the section, above the tabs: `Project: [ … ▼ ]`. It lists
+every project the server reports for the caller, always shows the selected project's name, auto-selects
+the only project when one exists, and shows the safe empty state (with an owner/admin create field)
+when none exists. Changing the project reloads the saved candidates and the analysis history for that
+project and clears every selection that belonged to the previous one — the selected candidate, the
+comparison set, the shown payload and the candidate markers on the map — so an id can never cross a
+project boundary. The selection is also written to the URL (`?project=<uuid>`), which is a deep link
+only: the server re-validates the project on every request.
 
 * **Analyze a site** — pick a saved candidate (or save the current map point), choose a radius preset
   (500 m / 1 km / 3 km / 5 km) or a custom radius, choose a model, then press *Run analysis*. The
@@ -268,4 +316,10 @@ datasets. Performance is not a Phase 6 concern: analyses are small, explicit use
 * **Scoring smoke** (`scripts/smoke-scoring-mode.ts`, CI only): drives the shipped API end to end
   against a clean Supabase stack — models, saved candidates, an analysis, a comparison, the stored
   read, snapshot survival across a model edit, the refusal paths and the CSV export — and parses every
-  raw HTTP response with the shipped client parser.
+  raw HTTP response with the shipped client parser. Phase 6.5 adds explicit project scenarios 21–24:
+  creating Project B (owner only; viewer/analyst/foreign owner refused), the unnamed-project `400` in a
+  multi-project workspace, a foreign project id failing byte-for-byte like a missing one on both the
+  read and the save path, Project A's candidates disappearing from Project B while Project B's
+  candidate never appears in Project A, a mixed-project comparison being refused without storing
+  anything, and the same workspace model scoring a candidate of either project with the history of
+  each project holding only its own analyses.

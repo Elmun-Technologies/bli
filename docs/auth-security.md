@@ -251,6 +251,35 @@ The query RPCs (`list_analysis_locations`, `save_analysis_location`, `list_locat
 RLS remains an independent layer behind every read and write. `anon` holds no `EXECUTE` right on any
 of them.
 
+### Explicit project context (Phase 6.5)
+
+Scoring changed one thing after Phase 6: the server no longer selects a project on the caller's
+behalf. There is no "oldest project", "first row" or "last used project" left in the code base, in
+SQL or in TypeScript.
+
+- **Reads and writes** resolve the caller's own projects first (a member read of `projects`, filtered
+  by RLS) and accept a project id only when it is one of them. `listSavedCandidates`,
+  `listStoredAnalyses`, `saveCandidate` and `runScoringAnalysis` all use that one resolver.
+- **Identical refusals.** A missing project id in a multi-project workspace, a project id of another
+  workspace, a project id that does not exist and a project the caller cannot see all return the same
+  `400` body (`project_required`, "Select a project in this workspace before continuing."). The
+  smoke test asserts the three bodies are byte-for-byte equal, so no route is an existence oracle.
+- **Zero projects** is the only empty answer (`projectId: null`); mutations return `400 no_project`
+  with the documented empty-state message. Nothing auto-creates a project.
+- **One project** resolves unambiguously and the response always names it, so even the convenience
+  path is explicit rather than silent.
+- **Database backstop.** `run_location_analysis` still refuses a candidate that is not in the named
+  project, `save_analysis_location` still verifies the project, and since
+  `20261005093000_phase65_project_context.sql` the two list RPCs raise `P0002` for a project that does
+  not belong to the named workspace instead of answering with an empty list. A non-member still gets
+  `42501` from the membership check before any project is looked up.
+- **Project creation** is an explicit owner/admin action through
+  `POST /api/workspaces/{workspaceId}/projects`, running under the caller's own JWT against the
+  existing `projects_insert_owner_admin` policy. The tenant path still never uses `service_role`.
+- **Models stay workspace-owned.** Projects select from the workspace's scoring models; creating a
+  project copies nothing, and the SQL engine suite asserts that the same model scores a candidate in
+  either project.
+
 ## First-owner bootstrap
 
 **Production / operator.** `public.bootstrap_workspace_owner(p_organization_slug,
@@ -347,6 +376,13 @@ cookie-aware anon client under the caller's own session; the scoring tables gran
 looks up membership in JavaScript and then switches to an elevated client, so RLS
 and the RPC's own membership assertion stay independent of the route guard.
 
+**Phase 6.5 adds no new elevated-credential use either.** The project list and the
+explicit project-creation endpoint (`/api/workspaces/{workspaceId}/projects`) run
+through the same cookie-aware client: the read is filtered by the member policy on
+`projects`, and the insert is allowed only by `projects_insert_owner_admin`. No
+elevated client is used for project context anywhere, before or after the project
+lookup.
+
 ## Workspace resolver and selector
 
 * `listAuthorizedWorkspaces(userId)` reads `workspace_members` through the
@@ -389,6 +425,15 @@ marked invalid rather than merged or dropped; a replayed commit inserts nothing;
 committed import cannot be re-pointed at a new dataset; and the two staging tables
 have no `DELETE` privilege for `authenticated`.
 
+`supabase/tests/phase6_scoring_rls.sql` covers the scoring phase the same way,
+and adds Phase 6.5's project rule: a member naming another workspace's project
+gets `P0002` from the list RPCs instead of an empty list, a non-member gets
+`42501` before any project is looked up, a comparison cannot mix a candidate of
+this workspace with one of another workspace, and a project that does not exist
+answers exactly like a foreign one. `phase6_scoring_engine.sql` asserts the
+project scoping of candidates and history plus the fact that one workspace-owned
+model scores candidates in either project.
+
 The end-to-end import smoke (`scripts/smoke-import-mode.ts`, run by
 `npm run smoke:imports` and in CI) drives the **shipped** client modules against
 the **shipped** production routes: it signs in, creates an import, uploads a real
@@ -412,14 +457,24 @@ posture (RLS enabled on all four tables, the expected policies, no blanket
 `USING (true)`/`WITH CHECK`, exactly one `SECURITY DEFINER` scoring function),
 the full role matrix through the RPCs, cross-workspace moves, foreign model,
 project, candidate and factor attempts (including the composite foreign key
-refusal beside the RLS refusal), and that `anon` gets nothing.
+refusal beside the RLS refusal), and that `anon` gets nothing. Phase 6.5 adds the
+project-context assertions: a member naming another workspace's project gets
+`P0002` (not an empty list), a non-member gets `42501` before the project is even
+looked up, and a project that does not exist answers exactly like a foreign one.
 
 The scoring smoke (`scripts/smoke-scoring-mode.ts`, run by `npm run smoke:scoring`
 and in CI) drives the shipped scoring API against the shipped production build and
 parses every raw HTTP response with the shipped client parser: models, saved
 candidates, a single analysis, a comparison, the stored read, an owner model edit
 that must not move a stored score, the refusal paths (analyst edit, viewer run,
-foreign owner, outsider, anonymous) and the comparison CSV export.
+foreign owner, outsider, anonymous) and the comparison CSV export. Phase 6.5
+extends it with explicit project scenarios: creating Project B (owner only), the
+unnamed-project `400` in a multi-project workspace, a foreign and a non-existent
+project id failing with a byte-for-byte identical body on both the read and the
+save path, Project A's candidates disappearing when Project B is listed and the
+reverse, a mixed-project comparison being refused without storing anything, and
+one workspace-owned model scoring a candidate in either project while each
+project's history holds only its own analyses.
 
 ### Verified results
 

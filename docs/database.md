@@ -248,13 +248,20 @@ session, and the storage bucket is reached with the same cookie-aware client.
 
 ## Phase 6 scoring schema
 
-Five migrations total lead to the scoring engine (see `docs/scoring.md` for the behaviour):
+Six migrations total lead to the scoring engine (see `docs/scoring.md` for the behaviour):
 
 - `20261005090000_phase6_scoring_engine.sql` — four tables, their constraints and triggers, six
   helper functions, the four scoring RPCs, RLS and the grant matrix.
 - `20261005092000_phase6_scoring_workspace_queries.sql` — the workspace-scoped query RPCs added
   after the engine: `list_analysis_locations`, `save_analysis_location` and
   `list_location_analyses` (membership-asserting, `SECURITY INVOKER`, with the optional mode filter).
+- `20261005093000_phase65_project_context.sql` — Phase 6.5: replaces the bodies of
+  `list_analysis_locations` and `list_location_analyses` so both verify that the named project
+  belongs to the named workspace *before* answering, raising `P0002` otherwise. A foreign or
+  non-existent project can no longer be answered with an empty list, which is what made the earlier
+  implicit "oldest project" workflow possible to misuse. No signature, table, policy or grant
+  changes; both functions stay `SECURITY INVOKER`, `authenticated`-only and `search_path =
+  pg_catalog`.
 
 Tables: `scoring_models`, `scoring_model_factors`, `location_analyses`,
 `location_analysis_results`. Money is stored and returned as exact `numeric`/text
@@ -278,15 +285,21 @@ Functions (all `SECURITY INVOKER` with `search_path = pg_catalog` unless noted):
 | `run_location_analysis(uuid, uuid, uuid[], integer, uuid, text)` | RPC, **`SECURITY DEFINER`** with an explicit `search_path` | The only writer of analyses; owner/admin/analyst |
 | `location_analysis_payload(uuid)` | helper | Builds the stored payload for one analysis |
 | `get_location_analysis(uuid, uuid)` | RPC | Reads one stored analysis |
-| `list_analysis_locations(uuid, uuid)` | RPC | Saved candidates of a project |
-| `save_analysis_location(uuid, uuid, text, double precision, double precision)` | RPC | Saves one candidate (owner/admin/analyst) |
-| `list_location_analyses(uuid, uuid, text, integer)` | RPC | Stored analyses newest first with an optional mode filter |
+| `list_analysis_locations(uuid, uuid)` | RPC | Saved candidates of a project; the project must belong to the workspace (`P0002` otherwise) |
+| `save_analysis_location(uuid, uuid, text, double precision, double precision)` | RPC | Saves one candidate (owner/admin/analyst); a foreign project raises `P0002` |
+| `list_location_analyses(uuid, uuid, text, integer)` | RPC | Stored analyses newest first with an optional mode filter; the project must belong to the workspace (`P0002` otherwise) |
 
 `run_location_analysis` is the single deliberate exception to `SECURITY INVOKER` in Phase 6: it
 must write analyses and results that no client may write directly, so it is defined safe
 (`search_path = pg_catalog`, schema-qualified references, membership and role asserted before any
 write) and it is the only Phase 6 function granted that posture. The RLS suite asserts that it is
 the only `SECURITY DEFINER` scoring function.
+
+Projects themselves keep the Phase 4 shape: `projects` has `projects_workspace_identity_unique
+UNIQUE (id, workspace_id)`, RLS enabled, member reads and owner/admin writes, and the same
+`authenticated` grants as before. Phase 6.5 adds no project table, no per-project model and no new
+policy; the project endpoints simply use that existing ownership model under the caller's own
+session.
 
 RLS is enabled on all four tables, `anon` holds zero privileges, and the grant matrix is: models
 (`SELECT`/`INSERT`/`UPDATE`), factors (`SELECT`/`INSERT`/`UPDATE`/`DELETE`), analyses and results

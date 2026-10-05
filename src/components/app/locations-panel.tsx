@@ -10,7 +10,8 @@
  * weight -> contribution -> total.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ArrowRight,
   Calculator,
@@ -19,6 +20,7 @@ import {
   LoaderCircle,
   MapPin,
   Play,
+  Plus,
   Save,
   TriangleAlert,
 } from 'lucide-react';
@@ -31,6 +33,7 @@ import {
   comparisonReady,
   mapCandidatesFromPayload,
   SCORING_TABS,
+  retainProjectScopedSelection,
   scoringTabLabel,
   selectionMessage,
   snapshotSummary,
@@ -51,13 +54,20 @@ import {
   scoreBandLabel,
 } from '@/lib/scoring/catalogue';
 import {
+  createWorkspaceProject,
   listSavedCandidates,
   listScoringModels,
   listStoredAnalyses,
+  listWorkspaceProjects,
   runAnalysis,
   saveCandidate,
   ScoringApiError,
 } from '@/lib/scoring/client';
+import {
+  NO_PROJECT_MESSAGE,
+  resolveProjectContext,
+  type WorkspaceProjectSummary,
+} from '@/lib/scoring/projects';
 import { downloadComparisonCsv } from '@/lib/scoring/export';
 import type {
   SavedCandidate,
@@ -78,7 +88,12 @@ const MANAGE_ROLES = new Set(['owner', 'admin']);
 
 interface ScoringContext {
   status: 'loading' | 'ready' | 'error';
+  /** The caller's own selectable projects, from the server. */
+  projects: WorkspaceProjectSummary[];
+  /** The project the loaded data belongs to; null while none is selected. */
   projectId: string | null;
+  /** Several projects exist and the caller has not chosen one yet. */
+  needsProjectSelection: boolean;
   models: ScoringModelSummary[];
   candidates: SavedCandidate[];
   history: ScoringAnalysisPayload[];
@@ -87,7 +102,9 @@ interface ScoringContext {
 
 const INITIAL_CONTEXT: ScoringContext = {
   status: 'loading',
+  projects: [],
   projectId: null,
+  needsProjectSelection: false,
   models: [],
   candidates: [],
   history: [],
@@ -102,6 +119,7 @@ export function LocationsPanel({
   workspaceId,
   workspaceRole,
   dataSource,
+  initialProjectId,
   selectedLocation,
   focusedCandidateId,
   onFocusedCandidateHandled,
@@ -111,6 +129,8 @@ export function LocationsPanel({
   workspaceId: string;
   workspaceRole: string;
   dataSource: DataSourceMode;
+  /** `?project=` from the page URL: a deep link, never an authorization claim. */
+  initialProjectId: string | null;
   selectedLocation: SelectedLocation;
   focusedCandidateId: string | null;
   onFocusedCandidateHandled: () => void;
@@ -119,6 +139,7 @@ export function LocationsPanel({
 }) {
   const canRun = RUN_ROLES.has(workspaceRole);
   const canManage = MANAGE_ROLES.has(workspaceRole);
+  const router = useRouter();
 
   const [tab, setTab] = useState<ScoringSectionTab>('analyze');
   const [context, setContext] = useState<ScoringContext>(INITIAL_CONTEXT);
@@ -134,44 +155,192 @@ export function LocationsPanel({
   const [saveName, setSaveName] = useState('');
   const [sortKey, setSortKey] = useState<ComparisonSortKey>('score');
   const [openBreakdownId, setOpenBreakdownId] = useState<string | null>(null);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [creatingProject, setCreatingProject] = useState(false);
 
   const history = context.history;
+  /** The project the URL asks for; a switch updates it without a reload. */
+  const urlProjectId = useRef<string | null>(initialProjectId);
 
-  const load = useCallback(async () => {
-    setContext((current) => ({ ...current, status: 'loading', errorMessage: null }));
-    try {
-      const models = await listScoringModels(workspaceId);
-      const candidatesResponse = await listSavedCandidates(workspaceId);
-      const analysesResponse = await listStoredAnalyses(workspaceId, candidatesResponse.projectId, {
-        limit: 8,
-      });
+  /**
+   * Loads one explicitly requested project. The server decides which projects
+   * exist, verifies the requested one against the caller's memberships and
+   * answers for that project only; the interface never picks a project itself.
+   */
+  const loadProject = useCallback(
+    async (requestedProjectId: string | null) => {
+      setContext((current) => ({ ...current, status: 'loading', errorMessage: null }));
+      try {
+        const [models, projects] = await Promise.all([
+          listScoringModels(workspaceId),
+          listWorkspaceProjects(workspaceId),
+        ]);
 
-      setContext({
-        status: 'ready',
-        projectId: candidatesResponse.projectId,
-        models,
-        candidates: candidatesResponse.candidates,
-        history: analysesResponse.analyses,
-        errorMessage: null,
-      });
-      setModelId((current) => current ?? models.find((model) => model.status === 'active')?.id ?? models[0]?.id ?? null);
-      setSelectedCandidateId((current) => current ?? candidatesResponse.candidates[0]?.id ?? null);
-    } catch (error) {
-      setContext((current) => ({
-        ...current,
-        status: 'error',
-        errorMessage: apiMessage(error, 'The scoring workspace could not be loaded.'),
-      }));
-    }
-  }, [workspaceId]);
+        const resolution = resolveProjectContext(projects, requestedProjectId);
+
+        // Several projects and no explicit choice: show the selector, choose
+        // nothing, and load no project-scoped data at all.
+        if (resolution.status === 'required') {
+          setContext({
+            status: 'ready',
+            projects,
+            projectId: null,
+            needsProjectSelection: true,
+            models,
+            candidates: [],
+            history: [],
+            errorMessage: null,
+          });
+          return;
+        }
+
+        // Zero projects: the safe empty state; nothing is created implicitly.
+        if (resolution.status === 'empty') {
+          setContext({
+            status: 'ready',
+            projects,
+            projectId: null,
+            needsProjectSelection: false,
+            models,
+            candidates: [],
+            history: [],
+            errorMessage: null,
+          });
+          return;
+        }
+
+        // The named project is not one of the caller's own: the server answers
+        // exactly as it would for a missing project, and the interface shows
+        // that safe refusal instead of substituting another project.
+        const candidatesResponse = await listSavedCandidates(
+          workspaceId,
+          resolution.status === 'resolved' ? resolution.projectId : requestedProjectId,
+        );
+        const selectedProjectId = candidatesResponse.projectId;
+
+        const analysesResponse = selectedProjectId
+          ? await listStoredAnalyses(workspaceId, selectedProjectId, { limit: 8 })
+          : { analyses: [] };
+
+        setContext({
+          status: 'ready',
+          projects: candidatesResponse.projects,
+          projectId: selectedProjectId,
+          needsProjectSelection: false,
+          models,
+          candidates: candidatesResponse.candidates,
+          history: analysesResponse.analyses,
+          errorMessage: null,
+        });
+        if (selectedProjectId && urlProjectId.current !== selectedProjectId) {
+          // The URL always names the project that answered, so a copied link and a
+          // reload resolve to the same explicit context.
+          urlProjectId.current = selectedProjectId;
+          router.replace(
+            `/workspaces/${workspaceId}?project=${encodeURIComponent(selectedProjectId)}`,
+            { scroll: false },
+          );
+        }
+        setModelId((current) => current ?? models.find((model) => model.status === 'active')?.id ?? models[0]?.id ?? null);
+        setSelectedCandidateId((current) => {
+          // A candidate of the previous project must never survive the switch.
+          const retained = retainProjectScopedSelection(
+            { selectedCandidateId: current, compareIds: [] },
+            candidatesResponse.candidates,
+          ).selectedCandidateId;
+          return retained ?? candidatesResponse.candidates[0]?.id ?? null;
+        });
+        setCompareIds((current) =>
+          retainProjectScopedSelection(
+            { selectedCandidateId: null, compareIds: current },
+            candidatesResponse.candidates,
+          ).compareIds,
+        );
+      } catch (error) {
+        setContext((current) => ({
+          ...current,
+          status: 'error',
+          projectId: null,
+          candidates: [],
+          history: [],
+          errorMessage: apiMessage(error, 'The scoring workspace could not be loaded.'),
+        }));
+      }
+    },
+    [router, workspaceId],
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadProject(urlProjectId.current);
+  }, [loadProject]);
 
-  // A map marker click opens that candidate's stored breakdown.
+  // Deep links and browser back/forward move `?project=`; a project the caller
+  // may not use is passed to the server, which refuses it safely.
+  useEffect(() => {
+    if (initialProjectId === urlProjectId.current) return;
+    urlProjectId.current = initialProjectId;
+    void loadProject(initialProjectId);
+  }, [initialProjectId, loadProject]);
+
+  /**
+   * Switching projects clears everything that belonged to the previous one
+   * before the new project's data arrives: the selected candidate, the
+   * comparison set, the shown payload and the markers on the map.
+   */
+  function selectProject(nextProjectId: string) {
+    if (nextProjectId === context.projectId) return;
+
+    setSelectedCandidateId(null);
+    setCompareIds([]);
+    setPayload(null);
+    setOpenBreakdownId(null);
+    setActionError(null);
+    setActionMessage(null);
+    setSaveOpen(false);
+    onShowOnMap([]);
+
+    urlProjectId.current = nextProjectId || null;
+    const query = nextProjectId ? `?project=${encodeURIComponent(nextProjectId)}` : '';
+    router.replace(`/workspaces/${workspaceId}${query}`, { scroll: false });
+    void loadProject(nextProjectId || null);
+  }
+
+  async function submitProject() {
+    if (!newProjectName.trim()) {
+      setActionError('Give the project a name.');
+      return;
+    }
+
+    setCreatingProject(true);
+    setActionError(null);
+    try {
+      const project = await createWorkspaceProject(workspaceId, { name: newProjectName.trim() });
+      setNewProjectName('');
+      setSelectedCandidateId(null);
+      setCompareIds([]);
+      setPayload(null);
+      urlProjectId.current = project.id;
+      router.replace(`/workspaces/${workspaceId}?project=${encodeURIComponent(project.id)}`, {
+        scroll: false,
+      });
+      await loadProject(project.id);
+      setActionMessage(`Created “${project.name}”.`);
+    } catch (error) {
+      setActionError(apiMessage(error, 'The project could not be created.'));
+    } finally {
+      setCreatingProject(false);
+    }
+  }
+
+  // A map marker click opens that candidate's stored breakdown. A marker that
+  // belongs to another project never selects anything here: the id is dropped
+  // instead of being carried into the current project.
   useEffect(() => {
     if (!focusedCandidateId) return;
+    if (!context.candidates.some((candidate) => candidate.id === focusedCandidateId)) {
+      onFocusedCandidateHandled();
+      return;
+    }
     setTab('analyze');
     setSelectedCandidateId(focusedCandidateId);
 
@@ -185,7 +354,7 @@ export function LocationsPanel({
       onShowOnMap(mapCandidatesFromPayload(stored));
     }
     onFocusedCandidateHandled();
-  }, [focusedCandidateId, history, onFocusedCandidateHandled, onShowOnMap]);
+  }, [context.candidates, focusedCandidateId, history, onFocusedCandidateHandled, onShowOnMap]);
 
   const activeModel = useMemo(
     () => context.models.find((model) => model.id === modelId) ?? null,
@@ -256,7 +425,10 @@ export function LocationsPanel({
       setSelectedCandidateId(saved.id);
       setSaveName('');
       setSaveOpen(false);
-      setActionMessage(`Saved “${saved.name}” for this workspace.`);
+      const projectName = context.projects.find((project) => project.id === context.projectId)?.name;
+      setActionMessage(
+        projectName ? `Saved “${saved.name}” in “${projectName}”.` : `Saved “${saved.name}”.`,
+      );
     } catch (error) {
       setActionError(apiMessage(error, 'The site could not be saved.'));
     } finally {
@@ -298,6 +470,68 @@ export function LocationsPanel({
         <span className="preview-badge">{workspaceRole.toUpperCase()}</span>
       </header>
 
+      {context.projects.length > 0 ? (
+        <div className="locations-project">
+          <label className="locations-project__field" htmlFor="locations-project-select">
+            <span className="scoring-control__label">Project</span>
+            <select
+              id="locations-project-select"
+              onChange={(event) => selectProject(event.target.value)}
+              value={context.projectId ?? ''}
+            >
+              {context.projectId === null ? (
+                <option disabled value="">
+                  Select a project…
+                </option>
+              ) : null}
+              {context.projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="locations-project__note">
+            {context.projectId
+              ? 'Saved sites, analyses and comparisons below belong to this project only.'
+              : 'Choose a project. Nothing is selected for you, and no project is created automatically.'}
+          </p>
+        </div>
+      ) : null}
+
+      {context.status === 'ready' && context.projects.length === 0 ? (
+        <div className="locations-project locations-project--empty">
+          <p className="scoring-empty">
+            <TriangleAlert aria-hidden="true" size={13} /> {NO_PROJECT_MESSAGE}
+          </p>
+          {canManage ? (
+            <div className="scoring-save__row">
+              <input
+                maxLength={120}
+                onChange={(event) => setNewProjectName(event.target.value)}
+                placeholder="New project name"
+                value={newProjectName}
+              />
+              <button
+                className="scoring-button"
+                disabled={creatingProject}
+                onClick={() => void submitProject()}
+                type="button"
+              >
+                {creatingProject ? (
+                  <LoaderCircle aria-hidden="true" className="scoring-spinner" size={13} />
+                ) : (
+                  <Plus aria-hidden="true" size={13} />
+                )}{' '}
+                Create project
+              </button>
+            </div>
+          ) : (
+            <small>Ask an owner or admin of this workspace to create a project.</small>
+          )}
+        </div>
+      ) : null}
+
       <nav aria-label="Scoring sections" className="locations-tabs">
         {SCORING_TABS.map((entry) => (
           <button
@@ -326,6 +560,12 @@ export function LocationsPanel({
         />
       ) : null}
 
+      {tab !== 'models' && context.status === 'ready' && context.needsProjectSelection ? (
+        <p className="scoring-empty">
+          Select a project above to load its saved sites and stored analyses.
+        </p>
+      ) : null}
+
       {tab !== 'models' && context.status === 'loading' ? (
         <p className="scoring-loading">
           <LoaderCircle aria-hidden="true" className="scoring-spinner" size={14} /> Loading saved
@@ -333,7 +573,7 @@ export function LocationsPanel({
         </p>
       ) : null}
 
-      {tab !== 'models' && context.status === 'ready' ? (
+      {tab !== 'models' && context.status === 'ready' && context.projectId !== null ? (
         <>
           <div className="scoring-controls">
             <div className="scoring-control">
