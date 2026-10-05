@@ -261,3 +261,135 @@ VALUES
   ('00000000-0000-4000-8000-000000000010', 'a1000000-0000-4000-8000-000000000004', 'viewer'),
   ('00000000-0000-4000-8000-000000000011', 'b1000000-0000-4000-8000-000000000001', 'owner')
 ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role;
+
+-- ---------------------------------------------------------------------------
+-- Phase 6 scoring: one generic, configurable model and three saved candidates
+-- ---------------------------------------------------------------------------
+-- The dimensions, weights and threshold stops below are seed data, not
+-- hard-coded business truth: every value is editable in the scoring model
+-- editor, and each analysis snapshots the revision it scored with. The model is
+-- threshold-based (absolute) so a single candidate can be scored on its own;
+-- comparison models can use min_max / inverse_min_max instead.
+
+INSERT INTO public.scoring_models (id, workspace_id, name, description, status, created_by)
+VALUES (
+  '00000000-0000-4000-8000-000000000040',
+  '00000000-0000-4000-8000-000000000010',
+  'Retail Expansion Model',
+  'Generic retail expansion score: customer density and revenue potential, competition, commercial activity and branch coverage. Threshold stops keep the score explainable for a single candidate.',
+  'active',
+  'a1000000-0000-4000-8000-000000000001'
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.scoring_model_factors (
+  model_id, workspace_id, key, label, metric, weight, direction, normalization,
+  configuration, enabled, sort_order
+)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000000040',
+    '00000000-0000-4000-8000-000000000010',
+    'customer_density',
+    'Customer Density',
+    'customers_count',
+    25.00,
+    'positive',
+    'threshold',
+    '{"points": [{"value": 0, "score": 0}, {"value": 500, "score": 50}, {"value": 1000, "score": 100}], "missing_score": 0, "degenerate_score": 50}'::jsonb,
+    true,
+    1
+  ),
+  (
+    '00000000-0000-4000-8000-000000000040',
+    '00000000-0000-4000-8000-000000000010',
+    'revenue_potential',
+    'Revenue Potential',
+    'customers_revenue_total',
+    25.00,
+    'positive',
+    'threshold',
+    '{"points": [{"value": 0, "score": 0}, {"value": 250000000, "score": 50}, {"value": 500000000, "score": 100}], "missing_score": 0, "degenerate_score": 50}'::jsonb,
+    true,
+    2
+  ),
+  (
+    '00000000-0000-4000-8000-000000000040',
+    '00000000-0000-4000-8000-000000000010',
+    'competition',
+    'Competition',
+    'competitors_count',
+    20.00,
+    'negative',
+    'threshold',
+    '{"points": [{"value": 0, "score": 100}, {"value": 20, "score": 0}], "missing_score": 100, "degenerate_score": 50}'::jsonb,
+    true,
+    3
+  ),
+  (
+    '00000000-0000-4000-8000-000000000040',
+    '00000000-0000-4000-8000-000000000010',
+    'commercial_activity',
+    'Commercial Activity',
+    'locations_count',
+    15.00,
+    'positive',
+    'threshold',
+    '{"points": [{"value": 0, "score": 0}, {"value": 50, "score": 50}, {"value": 100, "score": 100}], "missing_score": 0, "degenerate_score": 50}'::jsonb,
+    true,
+    4
+  ),
+  (
+    '00000000-0000-4000-8000-000000000040',
+    '00000000-0000-4000-8000-000000000010',
+    'branch_coverage',
+    'Branch Coverage',
+    'branch_distance_score',
+    15.00,
+    'positive',
+    'threshold',
+    '{"points": [{"value": 0, "score": 0}, {"value": 100, "score": 100}], "missing_score": 0, "degenerate_score": 50}'::jsonb,
+    true,
+    5
+  )
+ON CONFLICT (model_id, key) DO NOTHING;
+
+-- The seeded model is revision 1 whatever the trigger counted above, so a
+-- repeated seed cannot change the version an analysis would record.
+UPDATE public.scoring_models
+   SET version = 1
+ WHERE id = '00000000-0000-4000-8000-000000000040'
+   AND EXISTS (
+     SELECT 1 FROM public.scoring_model_factors WHERE model_id = '00000000-0000-4000-8000-000000000040'
+   );
+
+INSERT INTO public.analysis_locations (id, workspace_id, project_id, name, address, spatial_point, metadata)
+VALUES
+  (
+    '00000000-0000-4000-8000-000000000050',
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020',
+    'Yunusabad junction (saved candidate)',
+    'Synthetic candidate site · Tashkent',
+    extensions.st_setsrid(extensions.st_makepoint(69.2797, 41.3111), 4326)::extensions.geography,
+    '{"synthetic": true}'::jsonb
+  ),
+  (
+    '00000000-0000-4000-8000-000000000051',
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020',
+    'Chilonzor site (saved candidate)',
+    'Synthetic candidate site · Tashkent',
+    extensions.st_setsrid(extensions.st_makepoint(69.2900, 41.2950), 4326)::extensions.geography,
+    '{"synthetic": true}'::jsonb
+  ),
+  (
+    '00000000-0000-4000-8000-000000000052',
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020',
+    'Mirzo Ulugbek site (saved candidate)',
+    'Synthetic candidate site · Tashkent',
+    extensions.st_setsrid(extensions.st_makepoint(69.2650, 41.3300), 4326)::extensions.geography,
+    '{"synthetic": true}'::jsonb
+  )
+ON CONFLICT (id) DO NOTHING;

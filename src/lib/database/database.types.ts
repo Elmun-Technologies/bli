@@ -162,6 +162,62 @@ isOneToOne: false
       referencedColumns: ["id","workspace_id"]
     }
                   ]
+                },"location_analyses": {
+                  Row: {
+                    "candidate_count": number,"created_at": string,"created_by": string,"data_snapshot_at": string,"id": string,"mode": string,"model_name": string,"model_snapshot": NonNullable<Json>,"model_version": number,"project_id": string,"radius_meters": number,"scoring_model_id": string,"workspace_id": string
+                  }
+                  Insert: {
+                    "candidate_count": number,"created_at"?: string,"created_by": string,"data_snapshot_at"?: string,"id"?: string,"mode"?: string,"model_name": string,"model_snapshot": NonNullable<Json>,"model_version": number,"project_id": string,"radius_meters": number,"scoring_model_id": string,"workspace_id": string
+                  }
+                  Update: {
+                    "candidate_count"?: number,"created_at"?: string,"created_by"?: string,"data_snapshot_at"?: string,"id"?: string,"mode"?: string,"model_name"?: string,"model_snapshot"?: NonNullable<Json>,"model_version"?: number,"project_id"?: string,"radius_meters"?: number,"scoring_model_id"?: string,"workspace_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "location_analyses_model_fk"
+      columns: ["scoring_model_id","workspace_id"]
+isOneToOne: false
+      referencedRelation: "scoring_models"
+      referencedColumns: ["id","workspace_id"]
+    },{
+      foreignKeyName: "location_analyses_project_fk"
+      columns: ["project_id","workspace_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["id","workspace_id"]
+    },{
+      foreignKeyName: "location_analyses_workspace_fk"
+      columns: ["workspace_id"]
+isOneToOne: false
+      referencedRelation: "workspaces"
+      referencedColumns: ["id"]
+    }
+                  ]
+                },"location_analysis_results": {
+                  Row: {
+                    "analysis_id": string,"candidate_id": string,"candidate_name": string,"created_at": string,"factor_contributions": NonNullable<Json>,"final_score": number,"id": string,"latitude": number,"longitude": number,"normalized_metrics": NonNullable<Json>,"rank": number,"raw_metrics": NonNullable<Json>,"workspace_id": string
+                  }
+                  Insert: {
+                    "analysis_id": string,"candidate_id": string,"candidate_name": string,"created_at"?: string,"factor_contributions": NonNullable<Json>,"final_score": number,"id"?: string,"latitude": number,"longitude": number,"normalized_metrics": NonNullable<Json>,"rank": number,"raw_metrics": NonNullable<Json>,"workspace_id": string
+                  }
+                  Update: {
+                    "analysis_id"?: string,"candidate_id"?: string,"candidate_name"?: string,"created_at"?: string,"factor_contributions"?: NonNullable<Json>,"final_score"?: number,"id"?: string,"latitude"?: number,"longitude"?: number,"normalized_metrics"?: NonNullable<Json>,"rank"?: number,"raw_metrics"?: NonNullable<Json>,"workspace_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "location_analysis_results_analysis_fk"
+      columns: ["analysis_id","workspace_id"]
+isOneToOne: false
+      referencedRelation: "location_analyses"
+      referencedColumns: ["id","workspace_id"]
+    },{
+      foreignKeyName: "location_analysis_results_candidate_fk"
+      columns: ["candidate_id","workspace_id"]
+isOneToOne: false
+      referencedRelation: "analysis_locations"
+      referencedColumns: ["id","workspace_id"]
+    }
+                  ]
                 },"locations": {
                   Row: {
                     "address": string | null,"category": string,"created_at": string,"dataset_id": string,"external_id": string | null,"id": string,"import_job_id": string | null,"metadata": NonNullable<Json>,"name": string,"source": string | null,"source_row_number": number | null,"spatial_point": unknown,"subcategory": string | null,"updated_at": string,"workspace_id": string
@@ -250,6 +306,44 @@ isOneToOne: false
       referencedColumns: ["id"]
     }
                   ]
+                },"scoring_model_factors": {
+                  Row: {
+                    "configuration": NonNullable<Json>,"created_at": string,"direction": Database["public"]['Enums']["scoring_factor_direction"],"enabled": boolean,"id": string,"key": string,"label": string,"metric": string,"model_id": string,"normalization": Database["public"]['Enums']["scoring_normalization"],"sort_order": number,"updated_at": string,"weight": number,"workspace_id": string
+                  }
+                  Insert: {
+                    "configuration"?: NonNullable<Json>,"created_at"?: string,"direction": Database["public"]['Enums']["scoring_factor_direction"],"enabled"?: boolean,"id"?: string,"key": string,"label": string,"metric": string,"model_id": string,"normalization": Database["public"]['Enums']["scoring_normalization"],"sort_order"?: number,"updated_at"?: string,"weight": number,"workspace_id": string
+                  }
+                  Update: {
+                    "configuration"?: NonNullable<Json>,"created_at"?: string,"direction"?: Database["public"]['Enums']["scoring_factor_direction"],"enabled"?: boolean,"id"?: string,"key"?: string,"label"?: string,"metric"?: string,"model_id"?: string,"normalization"?: Database["public"]['Enums']["scoring_normalization"],"sort_order"?: number,"updated_at"?: string,"weight"?: number,"workspace_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "scoring_model_factors_model_fk"
+      columns: ["model_id","workspace_id"]
+isOneToOne: false
+      referencedRelation: "scoring_models"
+      referencedColumns: ["id","workspace_id"]
+    }
+                  ]
+                },"scoring_models": {
+                  Row: {
+                    "created_at": string,"created_by": string,"description": string | null,"id": string,"name": string,"status": Database["public"]['Enums']["scoring_model_status"],"updated_at": string,"version": number,"workspace_id": string
+                  }
+                  Insert: {
+                    "created_at"?: string,"created_by": string,"description"?: string | null,"id"?: string,"name": string,"status"?: Database["public"]['Enums']["scoring_model_status"],"updated_at"?: string,"version"?: number,"workspace_id": string
+                  }
+                  Update: {
+                    "created_at"?: string,"created_by"?: string,"description"?: string | null,"id"?: string,"name"?: string,"status"?: Database["public"]['Enums']["scoring_model_status"],"updated_at"?: string,"version"?: number,"workspace_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "scoring_models_workspace_fk"
+      columns: ["workspace_id"]
+isOneToOne: false
+      referencedRelation: "workspaces"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"workspace_members": {
                   Row: {
                     "created_at": string,"id": string,"role": Database["public"]['Enums']["workspace_member_role"],"updated_at": string,"user_id": string,"workspace_id": string
@@ -312,6 +406,9 @@ isOneToOne: false
               "conflicting_rows": number,"dataset_created": boolean,"inserted_rows": number,"job_id": string,"job_status": Database["public"]['Enums']["import_job_status"],"previously_committed_rows": number,"target_dataset_id": string
             }[]
                            },
+"create_scoring_model":
+{ Args: { "p_description": string,"p_factors": Json,"p_name": string,"p_status": Database["public"]['Enums']["scoring_model_status"],"p_workspace_id": string }; Returns: string
+                           },
 "demo_radius_analysis":
 { Args: { "p_latitude": number,"p_longitude": number,"p_radius_meters": number }; Returns: {
               "branches_count": number,"category_distribution": Json,"competitors_count": number,"customers_count": number,"customers_revenue_total": string,"locations_count": number,"nearest_branch_distance_meters": number,"nearest_branch_id": string,"nearest_branch_name": string
@@ -322,6 +419,9 @@ isOneToOne: false
               "category": string,"display_name": string,"feature_id": string,"kind": string,"latitude": number,"longitude": number
             }[]
                            },
+"get_location_analysis":
+{ Args: { "p_analysis_id": string,"p_workspace_id": string }; Returns: Json
+                           },
 "grant_workspace_owner":
 { Args: { "p_user_id": string,"p_workspace_id": string }; Returns: string
                            },
@@ -331,19 +431,49 @@ isOneToOne: false
 "import_object_workspace_id":
 { Args: { "p_object_name": string }; Returns: string
                            },
+"insert_scoring_factors":
+{ Args: { "p_factors": Json,"p_model_id": string,"p_workspace_id": string }; Returns: undefined
+                           },
 "is_workspace_member":
 { Args: { "p_workspace_id": string }; Returns: boolean
+                           },
+"location_analysis_payload":
+{ Args: { "p_analysis_id": string }; Returns: Json
                            },
 "refresh_import_job_counters":
 { Args: { "p_import_job_id": string }; Returns: {
               "committed_rows": number,"failed_geocoding_rows": number,"geocoded_rows": number,"invalid_rows": number,"job_status": Database["public"]['Enums']["import_job_status"],"needs_geocoding_rows": number,"total_rows": number,"valid_rows": number
             }[]
                            },
+"run_location_analysis":
+{ Args: { "p_candidate_ids": (string)[],"p_mode"?: string,"p_project_id": string,"p_radius_meters": number,"p_scoring_model_id": string,"p_workspace_id": string }; Returns: Json
+                           },
+"scoring_interpolate":
+{ Args: { "p_points": Json,"p_value": number }; Returns: number
+                           },
+"scoring_metric_text":
+{ Args: { "p_metric": string,"p_metrics": Json }; Returns: string
+                           },
+"scoring_metric_value":
+{ Args: { "p_metric": string,"p_metrics": Json }; Returns: number
+                           },
+"scoring_threshold_points_valid":
+{ Args: { "p_direction": Database["public"]['Enums']["scoring_factor_direction"],"p_points": Json }; Returns: boolean
+                           },
 "set_import_row_manual_point":
 { Args: { "p_import_row_id": string,"p_latitude": number,"p_longitude": number }; Returns: Database["public"]['Enums']["import_row_validation_status"]
                            },
 "update_import_job_metadata":
 { Args: { "p_import_job_id": string,"p_patch": Json }; Returns: Json
+                           },
+"update_scoring_model":
+{ Args: { "p_description": string,"p_factors": Json,"p_model_id": string,"p_name": string,"p_status": Database["public"]['Enums']["scoring_model_status"] }; Returns: number
+                           },
+"validate_scoring_factors":
+{ Args: { "p_factors": Json }; Returns: undefined
+                           },
+"workspace_data_updated_at":
+{ Args: { "p_workspace_id": string }; Returns: string
                            },
 "workspace_radius_analysis":
 { Args: { "p_latitude": number,"p_longitude": number,"p_radius_meters": number,"p_workspace_id": string }; Returns: {
@@ -360,7 +490,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "import_file_type": "csv"|"xlsx","import_job_status": "uploaded"|"mapping_required"|"ready"|"review_required"|"completed"|"failed","import_row_geocoding_status": "not_required"|"pending"|"geocoding"|"success"|"ambiguous"|"no_match"|"provider_error"|"rate_limited"|"manual_override","import_row_validation_status": "pending"|"valid"|"needs_geocoding"|"invalid","import_target_entity": "customers"|"locations","workspace_member_role": "owner"|"admin"|"analyst"|"viewer"
+            "import_file_type": "csv"|"xlsx","import_job_status": "uploaded"|"mapping_required"|"ready"|"review_required"|"completed"|"failed","import_row_geocoding_status": "not_required"|"pending"|"geocoding"|"success"|"ambiguous"|"no_match"|"provider_error"|"rate_limited"|"manual_override","import_row_validation_status": "pending"|"valid"|"needs_geocoding"|"invalid","import_target_entity": "customers"|"locations","scoring_factor_direction": "positive"|"negative"|"neutral","scoring_model_status": "draft"|"active"|"archived","scoring_normalization": "min_max"|"inverse_min_max"|"threshold","workspace_member_role": "owner"|"admin"|"analyst"|"viewer"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -476,7 +606,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "import_file_type": ["csv", "xlsx"],"import_job_status": ["uploaded", "mapping_required", "ready", "review_required", "completed", "failed"],"import_row_geocoding_status": ["not_required", "pending", "geocoding", "success", "ambiguous", "no_match", "provider_error", "rate_limited", "manual_override"],"import_row_validation_status": ["pending", "valid", "needs_geocoding", "invalid"],"import_target_entity": ["customers", "locations"],"workspace_member_role": ["owner", "admin", "analyst", "viewer"]
+            "import_file_type": ["csv", "xlsx"],"import_job_status": ["uploaded", "mapping_required", "ready", "review_required", "completed", "failed"],"import_row_geocoding_status": ["not_required", "pending", "geocoding", "success", "ambiguous", "no_match", "provider_error", "rate_limited", "manual_override"],"import_row_validation_status": ["pending", "valid", "needs_geocoding", "invalid"],"import_target_entity": ["customers", "locations"],"scoring_factor_direction": ["positive", "negative", "neutral"],"scoring_model_status": ["draft", "active", "archived"],"scoring_normalization": ["min_max", "inverse_min_max", "threshold"],"workspace_member_role": ["owner", "admin", "analyst", "viewer"]
           }
         }
 } as const
