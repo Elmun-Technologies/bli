@@ -309,8 +309,10 @@ and asserts:
 - cross-workspace access (jobs, staged rows, datasets, commit, provenance,
   storage, and re-parenting a job for a user who belongs to both workspaces) is
   refused by RLS, the composite foreign keys or the RPC role checks;
-- storage: the bucket is private, a malformed object path grants nothing, and
-  read/write/delete are membership-scoped;
+- storage: the bucket is private, a malformed object path grants nothing,
+  read/write/delete are membership-scoped, and a direct SQL `DELETE` is refused
+  by the platform (`storage.protect_delete`) without ever destroying the file —
+  removal is a Storage API operation authorized by that same policy;
 - the grant matrix (no `DELETE` for `authenticated`, no import privilege for
   `anon`, no blanket `USING (true)` policy anywhere).
 

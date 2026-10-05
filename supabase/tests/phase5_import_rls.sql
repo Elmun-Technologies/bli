@@ -123,7 +123,34 @@ BEGIN
 END;
 $phase5_error$;
 
+-- A stored object is removed through the Storage API, never through SQL: the
+-- platform protects storage.objects with a BEFORE DELETE trigger, and the
+-- membership-scoped DELETE policy is what authorizes the API call. Whatever the
+-- reason a direct attempt is refused, the file itself must survive.
+CREATE FUNCTION pg_temp.phase5_expect_storage_preserved(
+  p_description text,
+  p_delete_sql text,
+  p_check_sql text
+)
+RETURNS void
+LANGUAGE plpgsql
+AS $phase5_preserved$
+DECLARE
+  refused boolean := false;
+BEGIN
+  BEGIN
+    EXECUTE p_delete_sql;
+  EXCEPTION WHEN others THEN
+    refused := true;
+  END;
+
+  PERFORM pg_temp.phase5_expect_count(p_description, p_check_sql, 1);
+  RAISE NOTICE 'storage preserved (direct delete refused: %): %', refused, p_description;
+END;
+$phase5_preserved$;
+
 GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_denied(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_storage_preserved(text, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_zero_rows(text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_count(text, text, bigint) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_error(text, text, text) TO authenticated;
@@ -458,6 +485,27 @@ END;
 $phase5_manual_point$;
 
 -- ---------------------------------------------------------------------------
+-- Storage: the owner uploads the import file for their own workspace
+-- ---------------------------------------------------------------------------
+DO $phase5_storage_upload$
+DECLARE
+  workspace_a_object text := '00000000-0000-4000-8000-000000000010/11111111-1111-4111-8111-111111111111/source.csv';
+BEGIN
+  INSERT INTO storage.objects (bucket_id, name, owner, metadata)
+  VALUES ('workspace-imports', workspace_a_object, 'a1000000-0000-4000-8000-000000000001',
+          '{"mimetype":"text/csv","size":1024}'::jsonb);
+
+  PERFORM pg_temp.phase5_expect_count(
+    'an owner can read an import file of their workspace',
+    pg_catalog.format('SELECT pg_catalog.count(*) FROM storage.objects WHERE name = %L', workspace_a_object),
+    1
+  );
+
+  RAISE NOTICE 'Storage: the workspace import file exists and its own owner can read it';
+END;
+$phase5_storage_upload$;
+
+-- ---------------------------------------------------------------------------
 -- Viewer: read-only
 -- ---------------------------------------------------------------------------
 SET LOCAL request.jwt.claims = '{"sub":"a1000000-0000-4000-8000-000000000004","role":"authenticated"}';
@@ -661,12 +709,31 @@ BEGIN
     ),
     '23503'
   );
+  -- Owner B uploads a file for their own workspace, then proves they can neither
+  -- see nor remove the file of workspace A.
+  INSERT INTO storage.objects (bucket_id, name, owner)
+  VALUES ('workspace-imports',
+          '00000000-0000-4000-8000-000000000011/22222222-2222-4222-8222-222222222222/source.xlsx',
+          'b1000000-0000-4000-8000-000000000001');
+  PERFORM pg_temp.phase5_expect_count(
+    'workspace B can read its own import file',
+    'SELECT pg_catalog.count(*) FROM storage.objects
+      WHERE bucket_id = ''workspace-imports''
+        AND name = ''00000000-0000-4000-8000-000000000011/22222222-2222-4222-8222-222222222222/source.xlsx''',
+    1
+  );
   PERFORM pg_temp.phase5_expect_count(
     'workspace B cannot read workspace A import files',
     'SELECT pg_catalog.count(*) FROM storage.objects
       WHERE bucket_id = ''workspace-imports''
         AND name = ''00000000-0000-4000-8000-000000000010/11111111-1111-4111-8111-111111111111/source.csv''',
     0
+  );
+  PERFORM pg_temp.phase5_expect_zero_rows(
+    'deleting a workspace A import file from workspace B',
+    'DELETE FROM storage.objects
+      WHERE bucket_id = ''workspace-imports''
+        AND name = ''00000000-0000-4000-8000-000000000010/11111111-1111-4111-8111-111111111111/source.csv'''
   );
 
   RAISE NOTICE 'Cross-workspace: jobs, rows, datasets, commit, provenance and storage are all refused';
@@ -736,14 +803,9 @@ DECLARE
   workspace_b_object text := '00000000-0000-4000-8000-000000000011/22222222-2222-4222-8222-222222222222/source.xlsx';
   malformed_object text := 'not-a-workspace/22222222-2222-4222-8222-222222222222/source.csv';
 BEGIN
-  -- The owner uploads the file for their workspace.
-  INSERT INTO storage.objects (bucket_id, name, owner, metadata)
-  VALUES ('workspace-imports', workspace_a_object, 'a1000000-0000-4000-8000-000000000001',
-          '{"mimetype":"text/csv","size":1024}'::jsonb);
-
   PERFORM pg_temp.phase5_expect_count(
-    'an owner can read an import file of their workspace',
-    pg_catalog.format('SELECT pg_catalog.count(*) FROM storage.objects WHERE name = %L', workspace_a_object),
+    'a member of both workspaces can read the workspace B import file',
+    pg_catalog.format('SELECT pg_catalog.count(*) FROM storage.objects WHERE name = %L', workspace_b_object),
     1
   );
 
@@ -762,21 +824,21 @@ BEGIN
     0
   );
 
-  -- Deleting a file of another workspace is out of scope for this caller.
-  PERFORM pg_temp.phase5_expect_zero_rows(
-    'deleting a workspace B import file while in workspace A',
-    pg_catalog.format('DELETE FROM storage.objects WHERE name = %L', workspace_b_object)
+  -- A direct DELETE is never how a stored file disappears: the platform refuses
+  -- it (use the Storage API), and the membership-scoped DELETE policy is what
+  -- authorizes that API call. Either way the file survives the attempt.
+  PERFORM pg_temp.phase5_expect_storage_preserved(
+    'a direct delete of the workspace A import file',
+    pg_catalog.format('DELETE FROM storage.objects WHERE name = %L', workspace_a_object),
+    pg_catalog.format('SELECT pg_catalog.count(*) FROM storage.objects WHERE name = %L', workspace_a_object)
+  );
+  PERFORM pg_temp.phase5_expect_storage_preserved(
+    'a direct delete of the workspace B import file',
+    pg_catalog.format('DELETE FROM storage.objects WHERE name = %L', workspace_b_object),
+    pg_catalog.format('SELECT pg_catalog.count(*) FROM storage.objects WHERE name = %L', workspace_b_object)
   );
 
-  -- The documented behavior: an authorized member may delete their own file.
-  DELETE FROM storage.objects WHERE name = workspace_a_object;
-  PERFORM pg_temp.phase5_expect_count(
-    'an authorized member deleted their import file',
-    pg_catalog.format('SELECT pg_catalog.count(*) FROM storage.objects WHERE name = %L', workspace_a_object),
-    0
-  );
-
-  RAISE NOTICE 'Storage: private bucket, membership-scoped read/write/delete, malformed paths grant nothing';
+  RAISE NOTICE 'Storage: private bucket, membership-scoped access, malformed paths grant nothing, direct deletes never destroy a file';
 END;
 $phase5_storage$;
 
