@@ -230,9 +230,42 @@ BEGIN
 END;
 $p7rls_true$;
 
+-- "No access" is satisfied by either outcome: an outright privilege refusal or
+-- a filtered result of zero rows. Supabase's storage schema grants SELECT on
+-- storage.objects to anon (it must, so the storage API can answer public-bucket
+-- requests), which makes the row policy the barrier and yields zero rows; a
+-- harder-revoked environment refuses with 42501. Both mean an unauthenticated
+-- caller obtains no report row, no artifact path and no metadata, so the
+-- assertion accepts either and still fails if any row becomes visible.
+CREATE FUNCTION pg_temp.p7rls_expect_no_access(p_description text, p_sql text)
+RETURNS void
+LANGUAGE plpgsql
+AS $p7rls_no_access$
+DECLARE
+  actual bigint;
+  refused boolean := false;
+BEGIN
+  BEGIN
+    EXECUTE p_sql INTO actual;
+  EXCEPTION WHEN insufficient_privilege THEN
+    refused := true;
+  END;
+  IF refused THEN
+    RAISE NOTICE 'refused with insufficient_privilege as expected: %', p_description;
+    RETURN;
+  END IF;
+  IF actual IS DISTINCT FROM 0 THEN
+    RAISE EXCEPTION 'NO-ACCESS CASE FAILED (got % rows): %', actual, p_description;
+  END IF;
+  RAISE NOTICE 'zero rows as expected: %', p_description;
+END;
+$p7rls_no_access$;
+
 GRANT EXECUTE ON FUNCTION pg_temp.p7rls_expect_count(text, text, bigint) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.p7rls_expect_error(text, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.p7rls_expect_true(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION pg_temp.p7rls_expect_no_access(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION pg_temp.p7rls_expect_no_access(text, text) TO anon;
 
 -- ---------------------------------------------------------------------------
 -- Fixtures: one analysis per mode in the demo workspace, and a second project
@@ -257,6 +290,44 @@ VALUES
   ('report_comparison', '00000000-0000-4000-8000-0000000000a1'),
   ('report_single', '00000000-0000-4000-8000-0000000000a2'),
   ('report_isolation', '00000000-0000-4000-8000-0000000000a3');
+
+-- The grant matrix, at the privilege layer (catalog truth). `anon` is refused
+-- before RLS is consulted, `authenticated` holds exactly the documented
+-- privileges, nobody may delete, and the whole tenant report path needs no
+-- elevated credential: every privilege and function EXECUTE the shipped API
+-- relies on is held by `authenticated`.
+SELECT pg_temp.p7rls_expect_true(
+  'authenticated holds SELECT, INSERT and UPDATE but never DELETE on reports',
+  $sql$SELECT pg_catalog.has_table_privilege('authenticated', 'public.analysis_reports', 'SELECT')
+        AND pg_catalog.has_table_privilege('authenticated', 'public.analysis_reports', 'INSERT')
+        AND pg_catalog.has_table_privilege('authenticated', 'public.analysis_reports', 'UPDATE')
+        AND NOT pg_catalog.has_table_privilege('authenticated', 'public.analysis_reports', 'DELETE')
+        AND NOT pg_catalog.has_table_privilege('authenticated', 'public.analysis_reports', 'TRUNCATE')$sql$
+);
+
+SELECT pg_temp.p7rls_expect_true(
+  'anon holds no report table privilege at all',
+  $sql$SELECT NOT pg_catalog.has_table_privilege('anon', 'public.analysis_reports', 'SELECT')
+        AND NOT pg_catalog.has_table_privilege('anon', 'public.analysis_reports', 'INSERT')
+        AND NOT pg_catalog.has_table_privilege('anon', 'public.analysis_reports', 'UPDATE')
+        AND NOT pg_catalog.has_table_privilege('anon', 'public.analysis_reports', 'DELETE')$sql$
+);
+
+SELECT pg_temp.p7rls_expect_true(
+  'report artifacts are append-only for the API roles (no DELETE privilege)',
+  $sql$SELECT NOT pg_catalog.has_table_privilege('authenticated', 'storage.objects', 'DELETE')
+        AND NOT pg_catalog.has_table_privilege('anon', 'storage.objects', 'DELETE')$sql$
+);
+
+SELECT pg_temp.p7rls_expect_true(
+  'the tenant report path works with authenticated privileges only',
+  $sql$SELECT pg_catalog.has_function_privilege(
+            'authenticated', 'public.report_object_workspace_id(text)', 'EXECUTE')
+        AND pg_catalog.has_table_privilege('authenticated', 'public.location_analyses', 'SELECT')
+        AND pg_catalog.has_table_privilege('authenticated', 'public.location_analysis_results', 'SELECT')
+        AND pg_catalog.has_table_privilege('authenticated', 'storage.objects', 'SELECT')
+        AND pg_catalog.has_table_privilege('authenticated', 'storage.objects', 'INSERT')$sql$
+);
 
 SELECT pg_temp.p7rls_expect_true(
   'the path helper reads the workspace from a well-formed report object name',
@@ -757,6 +828,27 @@ SELECT pg_temp.p7rls_expect_count(
   1
 );
 
+SET LOCAL request.jwt.claims = '{"sub":"b1000000-0000-4000-8000-000000000001","role":"authenticated"}';
+
+-- Knowing (or guessing) a path must never be enough. Supabase's storage schema
+-- grants SELECT on storage.objects to authenticated, so the barrier here is the
+-- row policy, not a missing table privilege: the statement succeeds and returns
+-- zero rows even though the artifact provably exists (asserted just above).
+SELECT pg_temp.p7rls_expect_count(
+  'another workspace cannot download a report artifact by knowing its path',
+  $sql$SELECT pg_catalog.count(*) FROM storage.objects
+        WHERE bucket_id = 'analysis-reports'
+          AND name = (SELECT report_path FROM p7rls_probe WHERE label = 'comparison')$sql$,
+  0
+);
+
+SELECT pg_temp.p7rls_expect_count(
+  'another workspace cannot download a report by knowing its id',
+  $sql$SELECT pg_catalog.count(*) FROM public.analysis_reports
+        WHERE id = (SELECT value FROM p7rls_ids WHERE label = 'report_comparison')$sql$,
+  0
+);
+
 SELECT pg_temp.p7rls_expect_error(
   'a viewer cannot replace a stored PDF artifact',
   $sql$INSERT INTO storage.objects (bucket_id, name, owner)
@@ -780,10 +872,14 @@ SELECT pg_temp.p7rls_expect_error(
   '42501'
 );
 
-SELECT pg_temp.p7rls_expect_error(
+SELECT pg_temp.p7rls_expect_no_access(
   'an anonymous caller cannot download a report artifact',
-  $sql$SELECT pg_catalog.count(*) FROM storage.objects WHERE bucket_id = 'analysis-reports'$sql$,
-  '42501'
+  $sql$SELECT pg_catalog.count(*) FROM storage.objects WHERE bucket_id = 'analysis-reports'$sql$
+);
+
+SELECT pg_temp.p7rls_expect_no_access(
+  'an anonymous caller sees no report artifact of any workspace',
+  $sql$SELECT pg_catalog.count(*) FROM storage.objects$sql$
 );
 
 ROLLBACK;

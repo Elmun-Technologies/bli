@@ -116,7 +116,7 @@ CREATE TABLE public.workspace_members (
 | **analyst** | viewer reads | locations, customers, competitors, analysis_locations (insert/update/delete inside their workspace) | none — projects, datasets, branches are read-only | create jobs, upload, map, validate, geocode, place points manually, commit into an **existing** dataset; cannot create a dataset | run analyses and comparisons, save candidate locations; **cannot create or edit a scoring model** | create a report from a stored analysis, generate/regenerate/retry its PDF, preview and download; **cannot brand or rename** | none | no |
 | **admin** | all member reads | all analytical writes | projects, datasets, project_datasets, branches, business data | full import administration, including creating a destination dataset at commit time | run scoring and create, edit or archive scoring models | everything an analyst can do, plus report branding (title, company name, logo) | add/change/remove `viewer`, `analyst`, `admin` | no |
 | **owner** | all member reads | all analytical writes | full data administration plus workspace settings (`name`, `metadata`) | full import administration, including creating a destination dataset at commit time | run scoring and create, edit or archive scoring models | everything an admin can do; reports are never deleted by anyone | full membership administration, including owner grant/change/remove subject to last-owner protection | yes |
-| **service_role** | platform-default elevated access | operator paths only | `bootstrap_workspace_owner`, `grant_workspace_owner` | operator bootstrap only | none on the tenant scoring path: no scoring RPC or table is granted to `service_role`, and no code calls it | none on the tenant report path: no report table, bucket or RPC is granted to `service_role`, and no code calls it | yes (operator) | no |
+| **service_role** | platform-default elevated access | operator paths only | `bootstrap_workspace_owner`, `grant_workspace_owner` | operator bootstrap only | no new grant and no call site on the tenant scoring path: the phase grants it nothing and no code path uses it (it keeps the platform default, as on every public table) | no new grant and no call site on the tenant report path: the phase grants it nothing and no report code path uses it (it keeps the platform default) | yes (operator) | no |
 
 Branch data is intentionally owner/admin-only: nothing in Phase 1–3 required an
 analyst to create branches, so the conservative choice is the implemented one.
@@ -377,8 +377,10 @@ before. The import smoke asserts the map payload carries no phone, address or
 revenue after a real import.
 
 **Phase 6 adds no new elevated-credential use.** Every scoring route uses the
-cookie-aware anon client under the caller's own session; the scoring tables grant
-`service_role` nothing, and the only `SECURITY DEFINER` function in the phase
+cookie-aware anon client under the caller's own session; the phase grants
+`service_role` nothing new and no scoring code path calls it (the role keeps the
+platform default Supabase grants every public table, exactly as the Phase 4
+migration documents), and the only `SECURITY DEFINER` function in the phase
 (`run_location_analysis`) is a database object, not a credential. No scoring path
 looks up membership in JavaScript and then switches to an elevated client, so RLS
 and the RPC's own membership assertion stay independent of the route guard.
@@ -388,7 +390,10 @@ same cookie-aware anon client: the history, the preview, the creation, the
 generation, the logo upload and the authorized download all run under the
 caller's own session, so RLS on `analysis_reports` and the membership-scoped
 `storage.objects` policies apply on every read and write. The report tables and
-the `analysis-reports` bucket grant `service_role` nothing. The static-map token
+the `analysis-reports` bucket grant `service_role` nothing new and no report code
+path uses it (the role keeps Supabase's platform default, as everywhere else in
+`public`; the report API never switches to an elevated client, before or after a
+membership lookup). The static-map token
 (`MAPBOX_ACCESS_TOKEN`) is a *separate* server-only secret: it is read only in
 `src/lib/reports/map/mapbox-provider.ts`, is never a `NEXT_PUBLIC_*` variable, is
 never stored in a snapshot, a response, a log line or an artifact, and CI runs

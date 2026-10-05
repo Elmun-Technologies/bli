@@ -282,7 +282,8 @@ Rules that hold for every provider:
 Enforced twice: the route guard resolves the caller's role from the database
 before doing anything, and the RLS policies plus the explicit grants enforce the
 same matrix independently. No `service_role` is used anywhere in the tenant
-report path, and there is no `anon` privilege on the table or the bucket.
+report path (the phase grants it nothing and no report code path calls it),
+and there is no `anon` privilege on the table or the bucket.
 
 The interface only avoids offering an impossible action; it is never the
 authority.
