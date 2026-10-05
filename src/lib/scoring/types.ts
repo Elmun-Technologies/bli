@@ -143,6 +143,14 @@ export interface ScoringAnalysisPayload {
 }
 
 /**
+ * A payload exactly as the database returns it, before the shipped parser reads
+ * it. The server ships this shape unchanged so the browser parses the same bytes
+ * the database wrote; the parser is the single place that turns it into the
+ * typed objects above.
+ */
+export type ScoringWirePayload = Record<string, unknown>;
+
+/**
  * A saved candidate location as the API returns it: a user-authored site name
  * and its coordinates. No customer data and no address ever travel with it.
  */

@@ -11,12 +11,12 @@ import {
 } from './payload';
 import type {
   SavedCandidate,
-  ScoringAnalysisPayload,
   ScoringMode,
   ScoringModel,
   ScoringModelInput,
   ScoringModelSummary,
   ScoringRunRequest,
+  ScoringWirePayload,
 } from './types';
 
 /**
@@ -378,11 +378,36 @@ export async function saveCandidate(
   });
 }
 
+/**
+ * The server ships the database payload verbatim, and the browser reads it with
+ * the same shipped parser. Validating it here as well turns a payload the client
+ * could not read into a loud server error instead of a broken response.
+ */
+function assertScoringWirePayload(value: unknown, scope: string): void {
+  try {
+    parseScoringAnalysis(value);
+  } catch (error) {
+    throw new ScoringQueryError(`${scope} returned a payload the shipped parser rejects.`, {
+      cause: error,
+    });
+  }
+}
+
+function assertStoredAnalysisRows(rows: unknown, scope: string): void {
+  try {
+    parseStoredAnalysisList({ analyses: rows });
+  } catch (error) {
+    throw new ScoringQueryError(`${scope} returned stored analyses the parser rejects.`, {
+      cause: error,
+    });
+  }
+}
+
 /** Runs and stores one authoritative analysis or comparison. */
 export async function runScoringAnalysis(
   workspaceId: string,
   request: ScoringRunRequest,
-): Promise<ScoringAnalysisPayload> {
+): Promise<ScoringWirePayload> {
   return withAuthenticatedClient('scoring.analyses.run', async (client) => {
     const { data, error } = await client.rpc('run_location_analysis', {
       p_workspace_id: workspaceId,
@@ -395,8 +420,9 @@ export async function runScoringAnalysis(
 
     if (error) throwForPostgrestError('scoring.analyses.run', 'run', error);
     if (!data) throw new ScoringQueryError('scoring.analyses.run returned no payload.');
+    assertScoringWirePayload(data, 'scoring.analyses.run');
 
-    return parseScoringAnalysis(data);
+    return data as ScoringWirePayload;
   });
 }
 
@@ -404,7 +430,7 @@ export async function runScoringAnalysis(
 export async function getStoredAnalysis(
   workspaceId: string,
   analysisId: string,
-): Promise<ScoringAnalysisPayload> {
+): Promise<ScoringWirePayload> {
   return withAuthenticatedClient('scoring.analyses.get', async (client) => {
     const { data, error } = await client.rpc('get_location_analysis', {
       p_workspace_id: workspaceId,
@@ -413,8 +439,9 @@ export async function getStoredAnalysis(
 
     if (error) throwForPostgrestError('scoring.analyses.get', 'read', error);
     if (!data) throw new ScoringNotFoundError('Location analysis not found.');
+    assertScoringWirePayload(data, 'scoring.analyses.get');
 
-    return parseScoringAnalysis(data);
+    return data as ScoringWirePayload;
   });
 }
 
@@ -428,7 +455,7 @@ export async function listStoredAnalyses(
   projectId?: string | null,
   mode: ScoringMode | null = null,
   limit = 20,
-): Promise<{ projectId: string; analyses: ScoringAnalysisPayload[] }> {
+): Promise<{ projectId: string; analyses: ScoringWirePayload[] }> {
   return withAuthenticatedClient('scoring.analyses.list', async (client) => {
     const resolvedProjectId =
       projectId ?? (await resolveWorkspaceProjectId(client, workspaceId, 'scoring.analyses.list'));
@@ -442,9 +469,11 @@ export async function listStoredAnalyses(
 
     if (error) throwForPostgrestError('scoring.analyses.list', 'read', error);
 
-    return {
-      projectId: resolvedProjectId,
-      analyses: parseStoredAnalysisList({ analyses: data ?? [] }),
-    };
+    const rows = (data ?? []) as ScoringWirePayload[];
+    assertStoredAnalysisRows(rows, 'scoring.analyses.list');
+
+    // Each row is `{ analysis: <stored payload> }` exactly as the database table
+    // RPC returns it; the client parser unwraps it.
+    return { projectId: resolvedProjectId, analyses: rows };
   });
 }

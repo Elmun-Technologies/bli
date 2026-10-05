@@ -20,7 +20,7 @@ import test from 'node:test';
 
 import { findMetric, formatMetricValue, formatScore, scoreBandLabel, SCORE_BANDS } from './catalogue';
 import { buildComparisonCsv, comparisonCsvFilename } from './export';
-import { parseScoringAnalysis, parseScoringModelList } from './payload';
+import { parseScoringAnalysis, parseScoringModel, parseScoringModelList } from './payload';
 import type { AnalysisCandidateResult, ScoringAnalysisPayload, ScoringFactor } from './types';
 import {
   checkFactorSet,
@@ -145,6 +145,53 @@ test('the captured comparison payload keeps its stored order and decimals', () =
     payload.results.map((result) => result.rawMetrics.customersRevenueTotal),
     ['2908.59', '2620.74', '2446.76'],
   );
+});
+
+test('a full model as the API returns it parses into the editor contract', () => {
+  // `GET/POST/PATCH /scoring-models/{id}` return the camelCase model the service
+  // assembled; the shipped parser must read it without a database row in sight.
+  const apiPayload = {
+    model: {
+      id: '00000000-0000-4000-8000-000000000040',
+      workspaceId: '00000000-0000-4000-8000-000000000010',
+      name: 'Retail Expansion Model',
+      description: 'Generic retail expansion score.',
+      status: 'active',
+      version: 3,
+      createdAt: '2026-10-05T06:00:00.000+00:00',
+      updatedAt: '2026-10-05T06:02:00.000+00:00',
+      factors: [
+        {
+          key: 'competition',
+          label: 'Competition',
+          metric: 'competitors_count',
+          weight: 20,
+          direction: 'negative',
+          normalization: 'threshold',
+          configuration: {
+            points: [
+              { value: 0, score: 100 },
+              { value: 20, score: 0 },
+            ],
+            missing_score: 100,
+            degenerate_score: 50,
+          },
+          enabled: true,
+          sortOrder: 2,
+        },
+      ],
+    },
+  };
+
+  const model = parseScoringModel((apiPayload as { model: unknown }).model);
+  assert.equal(model.workspaceId, '00000000-0000-4000-8000-000000000010');
+  assert.equal(model.version, 3);
+  assert.equal(model.createdAt, '2026-10-05T06:00:00.000+00:00');
+  assert.equal(model.factors.length, 1);
+  assert.equal(model.factors[0].sortOrder, 2);
+  assert.equal(model.factors[0].direction, 'negative');
+  assert.equal(model.factors[0].configuration.points?.length, 2);
+  assert.equal(model.factors[0].configuration.points?.[0].score, 100);
 });
 
 test('a stored payload without a final score is refused, never read as zero', () => {

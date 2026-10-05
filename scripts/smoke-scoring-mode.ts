@@ -314,6 +314,16 @@ async function main() {
     );
     assert(rawResponse.ok, `the raw analysis request failed with ${rawResponse.status}`);
     const rawBody: unknown = await rawResponse.json();
+    const rawObject = rawBody as { analysis?: Record<string, unknown>; results?: unknown[] };
+    assert(
+      typeof rawObject.analysis?.workspace_id === 'string' &&
+        typeof rawObject.analysis?.data_snapshot_at === 'string',
+      'the server must ship the database payload shape, not a renamed copy of it',
+    );
+    assert(
+      !('workspaceId' in (rawObject.analysis ?? {})),
+      'the wire payload keeps the database field names the shipped parser reads',
+    );
     const parsedRaw = parseScoringAnalysis(rawBody);
     assert(
       parsedRaw.results.length === 1 && Number.isFinite(scoreOf(parsedRaw)),
