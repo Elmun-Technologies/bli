@@ -170,6 +170,21 @@ BEGIN
     RAISE EXCEPTION 'Expected report storage policies are missing: %', missing_storage_policy;
   END IF;
 
+  -- Report artifacts are append-only. Privileges alone are not the barrier here
+  -- (Supabase's storage schema grants broad DML on storage.objects to the API
+  -- roles and relies on policies), so the guarantee is asserted where it lives:
+  -- no DELETE or ALL policy may mention the report bucket.
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_policies AS policy
+     WHERE policy.schemaname = 'storage'
+       AND policy.tablename = 'objects'
+       AND policy.cmd IN ('DELETE', 'ALL')
+       AND (policy.qual LIKE '%analysis-reports%'
+            OR policy.with_check LIKE '%analysis-reports%')
+  ) THEN
+    RAISE EXCEPTION 'No policy may delete a report artifact';
+  END IF;
+
   RAISE NOTICE 'Preflight: RLS, policies, grants, constraints, triggers, bucket and path helper are in place';
 END;
 $phase7_rls_preflight$;
@@ -314,9 +329,15 @@ SELECT pg_temp.p7rls_expect_true(
 );
 
 SELECT pg_temp.p7rls_expect_true(
-  'report artifacts are append-only for the API roles (no DELETE privilege)',
-  $sql$SELECT NOT pg_catalog.has_table_privilege('authenticated', 'storage.objects', 'DELETE')
-        AND NOT pg_catalog.has_table_privilege('anon', 'storage.objects', 'DELETE')$sql$
+  'no policy allows deleting a report artifact (append-only by policy)',
+  $sql$SELECT NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_policies AS policy
+         WHERE policy.schemaname = 'storage'
+           AND policy.tablename = 'objects'
+           AND policy.cmd IN ('DELETE', 'ALL')
+           AND (policy.qual LIKE '%analysis-reports%'
+            OR policy.with_check LIKE '%analysis-reports%')
+      )$sql$
 );
 
 SELECT pg_temp.p7rls_expect_true(
