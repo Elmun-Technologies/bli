@@ -98,6 +98,7 @@ const JOB_COLUMNS = [
   'target_entity',
   'dataset_id',
   'sheet_name',
+  'column_mapping',
   'metadata',
   'total_rows',
   'valid_rows',
@@ -270,6 +271,17 @@ function suggestionsOf(value: unknown): ColumnSuggestion[] {
   );
 }
 
+/**
+ * The job's column mapping. It lives in `import_jobs.column_mapping` (the
+ * metadata RPC routes a `mapping` patch there), so the job row keeps exactly one
+ * authoritative copy - the same object the wizard uploaded and the preview and
+ * error export read back.
+ */
+function mappingOf(job: Record<string, unknown>): ColumnMapping {
+  const mapping = job.column_mapping;
+  return mapping !== null && typeof mapping === 'object' ? (mapping as ColumnMapping) : {};
+}
+
 export function toJobView(job: Record<string, unknown>): ImportJobView {
   const metadata = metadataOf(job);
   return {
@@ -284,10 +296,7 @@ export function toJobView(job: Record<string, unknown>): ImportJobView {
     sheets: sheetsOf(metadata.sheets),
     headers: stringArray(metadata.headers),
     warnings: stringArray(metadata.warnings),
-    mapping:
-      metadata.mapping !== null && typeof metadata.mapping === 'object'
-        ? (metadata.mapping as ColumnMapping)
-        : {},
+    mapping: mappingOf(job),
     suggestions: suggestionsOf(metadata.suggestions),
     counters: {
       totalRows: Number(job.total_rows ?? 0),
@@ -818,7 +827,7 @@ export async function listImportRows(input: {
   return withAuthenticatedClient('imports/rows', async (client) => {
     const job = await readJob(client, input.workspaceId, input.importId);
     const fields = previewFieldsFor(job.target_entity as ImportTargetEntity);
-    const mapping = (job.column_mapping ?? {}) as ColumnMapping;
+    const mapping = mappingOf(job);
 
     let query = client
       .from('import_rows')
@@ -878,7 +887,7 @@ export async function exportImportErrors(input: {
   return withAuthenticatedClient('imports/export', async (client) => {
     const job = await readJob(client, input.workspaceId, input.importId);
     const fields = previewFieldsFor(job.target_entity as ImportTargetEntity);
-    const mapping = (job.column_mapping ?? {}) as ColumnMapping;
+    const mapping = mappingOf(job);
 
     let query = client
       .from('import_rows')

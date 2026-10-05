@@ -297,7 +297,7 @@ async function main() {
     );
     assert(
       invalidRow.rawData.name === FORMULA_NAME,
-      'a formula-looking value is stored verbatim as text and never executed',
+      `a formula-looking value is stored verbatim as text and never executed (got ${JSON.stringify(invalidRow.rawData.name)})`,
     );
 
     note('8. A geocoding batch resolves the address-only rows without a real provider.');

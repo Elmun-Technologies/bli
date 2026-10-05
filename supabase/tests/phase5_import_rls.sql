@@ -239,6 +239,58 @@ SELECT job.id, job.workspace_id, staged.row_number, staged.raw_data, staged.norm
   ) AS staged(row_number, raw_data, normalized_data, validation_status, validation_errors,
               geocoding_status, longitude, latitude);
 
+-- ---------------------------------------------------------------------------
+-- Mapping metadata: one authoritative copy, in the dedicated column
+-- ---------------------------------------------------------------------------
+DO $phase5_mapping_metadata$
+DECLARE
+  job_id uuid := (SELECT id FROM phase5_job);
+  stored jsonb;
+  stored_metadata jsonb;
+BEGIN
+  PERFORM public.update_import_job_metadata(
+    job_id,
+    '{"mapping":{"Mijoz":"name","Manzil":"address"},"headers":["Mijoz","Manzil"],"warnings":[]}'::jsonb
+  );
+
+  SELECT target.column_mapping, target.metadata
+    INTO stored, stored_metadata
+    FROM public.import_jobs AS target
+   WHERE target.id = job_id;
+
+  IF stored IS DISTINCT FROM '{"Mijoz":"name","Manzil":"address"}'::jsonb THEN
+    RAISE EXCEPTION 'The mapping was not routed into import_jobs.column_mapping: %', stored;
+  END IF;
+  IF pg_catalog.jsonb_exists(stored_metadata, 'mapping') THEN
+    RAISE EXCEPTION 'The mapping must not also be duplicated inside import_jobs.metadata: %', stored_metadata;
+  END IF;
+  IF stored_metadata -> 'headers' IS DISTINCT FROM '["Mijoz","Manzil"]'::jsonb THEN
+    RAISE EXCEPTION 'Parse metadata was not merged into import_jobs.metadata: %', stored_metadata;
+  END IF;
+
+  PERFORM pg_temp.phase5_expect_error(
+    'a mapping patch that is not a JSON object',
+    pg_catalog.format(
+      'SELECT public.update_import_job_metadata(%L::uuid, %L::jsonb)',
+      job_id,
+      '{"mapping":"name"}'
+    ),
+    '22023'
+  );
+  PERFORM pg_temp.phase5_expect_error(
+    'an unsupported metadata key',
+    pg_catalog.format(
+      'SELECT public.update_import_job_metadata(%L::uuid, %L::jsonb)',
+      job_id,
+      '{"totally_unknown":"value"}'
+    ),
+    '22023'
+  );
+
+  RAISE NOTICE 'Mapping metadata: column_mapping holds the only copy, parse keys merge into metadata, and anything unsupported is refused';
+END;
+$phase5_mapping_metadata$;
+
 DO $phase5_owner_happy$
 DECLARE
   counters record;

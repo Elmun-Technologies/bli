@@ -20,7 +20,7 @@
 6. `20261005050000_phase5_import_workflow.sql` — creates the import enums, `import_jobs` and `import_rows`, the provenance columns and composite foreign keys on the spatial tables, the completion-write trigger, the counters/claim/apply/manual-point/commit functions, and the per-table policies and grants for the staging tables. `commit_import_job` is the only writer of `status = 'completed'` and `committed_at`.
 7. `20261005060000_phase5_import_storage.sql` — inserts (or re-asserts) the private `workspace-imports` bucket with its 5 MB limit and MIME allow-list, creates `public.import_object_workspace_id(text)` and the four membership-scoped `storage.objects` policies for owner/admin/analyst.
 8. `20261005070000_phase5_geocoding_results.sql` — creates `claim_import_geocoding_rows` (bounded, lease-based, retry-capped) and `apply_import_geocoding_results` (idempotent, validating, counter-refreshing).
-9. `20261005080000_phase5_import_metadata.sql` — creates `update_import_job_metadata` so the workflow can record headers, sheet lists, warnings, suggestions and mapping without widening the `import_jobs` UPDATE policy to arbitrary client writes.
+9. `20261005080000_phase5_import_metadata.sql` — creates `update_import_job_metadata` so the workflow can record headers, sheet lists, warnings and suggestions in `import_jobs.metadata` and the chosen mapping in the dedicated `import_jobs.column_mapping` column, without letting a client write arbitrary keys into either.
 
 `supabase/seed.sql` is **not** a migration. It is deterministic synthetic demo data loaded by `supabase db reset --local` (configured under `[db.seed]` in `supabase/config.toml`) and by CI. Production deployments apply migrations only and never seed this file.
 

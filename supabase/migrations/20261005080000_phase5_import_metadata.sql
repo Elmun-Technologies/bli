@@ -1,10 +1,13 @@
 -- Phase 5 (part 4 of 4): whitelisted import metadata updates.
 --
--- The API records parse results (headers, sheets, warnings, the chosen mapping)
--- in `import_jobs.metadata`. Writing that from the API as a read-modify-write
--- would race with a second tab and would let a client write arbitrary keys into
--- a column some future code might trust. So the merge happens here, with a
--- whitelist: an unknown key is refused rather than stored.
+-- The API records parse results (headers, sheets, warnings, suggestions) in
+-- `import_jobs.metadata`, and the chosen column mapping in the dedicated
+-- `import_jobs.column_mapping` column. Writing either from the API as a
+-- read-modify-write would race with a second tab and would let a client write
+-- arbitrary keys into a column some future code might trust. So the routing and
+-- the merge happen here, with a whitelist: an unknown key is refused rather than
+-- stored, and a `mapping` patch goes to its own column so the job row keeps
+-- exactly one authoritative copy of the mapping.
 --
 -- Everything else about the job (workspace, creator, dataset, counters, status)
 -- stays out of reach: counters and status are derived by
@@ -22,10 +25,14 @@ SET search_path = pg_catalog
 AS $function$
 DECLARE
   job public.import_jobs;
+  -- `mapping` is deliberately absent: it is routed into column_mapping instead
+  -- of being merged into the metadata blob.
   allowed_keys constant text[] := ARRAY[
     'headers', 'sheets', 'warnings', 'parser', 'rowCount',
-    'selectedSheet', 'suggestions', 'mapping', 'validatedAt'
+    'selectedSheet', 'suggestions', 'validatedAt'
   ];
+  mapping jsonb;
+  remainder jsonb;
   unknown_keys text;
   updated jsonb;
 BEGIN
@@ -36,9 +43,19 @@ BEGIN
     RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'A metadata patch object is required';
   END IF;
 
+  IF p_patch ? 'mapping' THEN
+    mapping := p_patch -> 'mapping';
+    IF pg_catalog.jsonb_typeof(mapping) <> 'object' THEN
+      RAISE EXCEPTION USING
+        ERRCODE = '22023',
+        MESSAGE = 'A column mapping must be a JSON object';
+    END IF;
+  END IF;
+  remainder := p_patch - 'mapping';
+
   SELECT pg_catalog.string_agg(key, ', ')
     INTO unknown_keys
-    FROM pg_catalog.jsonb_object_keys(p_patch) AS key
+    FROM pg_catalog.jsonb_object_keys(remainder) AS key
    WHERE key <> ALL (allowed_keys);
   IF unknown_keys IS NOT NULL THEN
     RAISE EXCEPTION USING
@@ -62,7 +79,8 @@ BEGIN
   END IF;
 
   UPDATE public.import_jobs AS target
-     SET metadata = target.metadata || p_patch
+     SET metadata = target.metadata || remainder,
+         column_mapping = COALESCE(mapping, target.column_mapping)
    WHERE target.id = p_import_job_id
   RETURNING target.metadata INTO updated;
 
@@ -71,7 +89,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.update_import_job_metadata(uuid, jsonb) IS
-  'Merges whitelisted parse/mapping metadata into import_jobs.metadata (unknown keys are refused). SECURITY INVOKER with an explicit owner/admin/analyst assertion.';
+  'Merges whitelisted parse metadata into import_jobs.metadata, routes a mapping patch into import_jobs.column_mapping, and refuses unknown keys. SECURITY INVOKER with an explicit owner/admin/analyst assertion.';
 
 REVOKE ALL ON FUNCTION public.update_import_job_metadata(uuid, jsonb)
   FROM PUBLIC, anon, authenticated;

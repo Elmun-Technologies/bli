@@ -71,7 +71,7 @@ Suggestions cover Uzbek Latin, Russian/Cyrillic and English headings, e.g.
 | `external_id` | id, code, kod, код, mijoz id |
 | `category` / `subcategory` (locations) | category, kategoriya, категория / subcategory, подкатегория |
 
-Only **exact** alias matches are preselected; partial matches are offered as a hint. Every column can be remapped by the user, and a column that names a real field already claimed by an earlier column is deliberately left unmapped rather than guessed. The mapping is stored on the job and can be applied repeatedly: re-validating upserts staged rows per row number (the tables grant no `DELETE`), so the same import never duplicates rows.
+Only **exact** alias matches are preselected; partial matches are offered as a hint. Every column can be remapped by the user, and a column that names a real field already claimed by an earlier column is deliberately left unmapped rather than guessed. The mapping is stored in the dedicated `import_jobs.column_mapping` column (the job row keeps exactly one authoritative copy, written through the whitelisting `update_import_job_metadata` function) and can be applied repeatedly: re-validating upserts staged rows per row number (the tables grant no `DELETE`), so the same import never duplicates rows.
 
 ## Validation and per-row outcome
 
