@@ -39,7 +39,7 @@ const MAIN_NAVIGATION: NavigationItem[] = [
   { label: 'Map', icon: Map, phase: undefined },
   { label: 'Import', icon: Upload, phase: undefined },
   { label: 'Customers', icon: UsersRound, phase: 'Phase 5' },
-  { label: 'Locations', icon: MapPinHouse, phase: 'Phase 6' },
+  { label: 'Locations', icon: MapPinHouse, phase: undefined },
   { label: 'Competitors', icon: Store, phase: 'Phase 2' },
 ];
 

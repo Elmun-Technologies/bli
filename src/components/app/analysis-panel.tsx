@@ -45,6 +45,8 @@ interface AnalysisPanelProps {
   analysis: AnalysisState;
   mapDataState: MapDataState;
   onAnalyze: () => void;
+  /** Opens the scoring section, where a site is scored and explained. */
+  onOpenScoring: () => void;
 }
 
 function mapDataStateLabel(mapDataState: MapDataState): string {
@@ -67,6 +69,7 @@ export function AnalysisPanel({
   analysis,
   mapDataState,
   onAnalyze,
+  onOpenScoring,
 }: AnalysisPanelProps) {
   const [customRadiusInput, setCustomRadiusInput] = useState(false);
   const isPresetRadius = RADIUS_PRESETS.some((preset) => preset === radiusMeters);
@@ -303,17 +306,18 @@ export function AnalysisPanel({
             <p className="section-eyebrow">SITE POTENTIAL</p>
             <h2 id="score-title">Location score</h2>
           </div>
-          <span className="score-not-ready">Not scored</span>
+          <span className="score-not-ready">Scored in Locations</span>
         </div>
         <div aria-hidden="true" className="score-preview-card__track">
           <span />
         </div>
         <p>
-          A configurable, explainable scoring model will be added in a later phase; Phase 3 only
-          returns observed PostGIS aggregates.
+          This panel reports what PostGIS measures inside the radius. A configurable, explainable
+          score — raw metric, normalization, weight and contribution — runs in the Locations
+          section, on a saved candidate site.
         </p>
-        <button className="score-preview-card__link" disabled type="button">
-          Explore score inputs <ArrowUpRight aria-hidden="true" size={14} />
+        <button className="score-preview-card__link" onClick={onOpenScoring} type="button">
+          Open location scoring <ArrowUpRight aria-hidden="true" size={14} />
         </button>
       </section>
 

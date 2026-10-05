@@ -299,6 +299,7 @@ export function AppShell({
               dataSource={dataSource}
               mapDataState={mapDataState}
               onAnalyze={handleAnalyze}
+              onOpenScoring={() => setActiveSection('Locations')}
               onRadiusChange={setRadiusMeters}
               radiusMeters={radiusMeters}
               selectedLocation={selectedLocation}

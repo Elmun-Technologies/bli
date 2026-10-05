@@ -22,8 +22,9 @@ const SECTION_DETAILS: Record<WorkspaceSection, { phase: string; description: st
     description: 'Customer uploads, validation, privacy controls, clustering and heatmaps are planned here.',
   },
   Locations: {
-    phase: 'Phase 6',
-    description: 'Save candidate sites, explain their scores and compare expansion options.',
+    phase: 'Phase 6 · database workspace',
+    description:
+      'Save candidate sites, configure the scoring model, explain every score and compare two to five expansion options. It runs against the PostGIS workspace, so the fixture preview shows this section as a placeholder.',
   },
   Competitors: {
     phase: 'Phase 2–3',
