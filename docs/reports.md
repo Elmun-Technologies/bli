@@ -359,8 +359,11 @@ new data or new model revision ─► run a new analysis ─► create a new rep
 The UI says so explicitly, in the reports section and in the analysis detail
 where a report is created.
 
-One field does legitimately move when a report is regenerated: the document's own
-**"report generated"** line, which states when *this PDF* was produced. Everything
+A freshly generated document states its own **"report generated"** time: the
+timestamp is rendered into the PDF and persisted as `generated_at` from the same
+value, so a new report never prints "not generated yet" and a failed generation
+never claims a report time. That line is also the one field that legitimately
+moves when a report is regenerated: it states when *this PDF* was produced. Everything
 derived from the snapshot — scores, ranks, metrics, contributions, factors, the
 analysis and data-snapshot times, the hash and the map — is byte-for-byte the same
 input. The end-to-end smoke asserts exactly that distinction: it normalizes the

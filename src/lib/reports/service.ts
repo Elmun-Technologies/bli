@@ -501,10 +501,15 @@ export async function generateReport(
     }
 
     const snapshot = parseReportSnapshot(row.snapshot);
+    // The document prints when *this* PDF was generated. The timestamp is
+    // computed once, rendered into the document and then persisted with the ready
+    // update, so a freshly generated report states its own report time instead of
+    // "not generated yet", and a failed generation claims none.
+    const generatedAt = new Date().toISOString();
     const viewModel = buildReportViewModel(snapshot, {
       reportId: row.id,
       status: 'generating',
-      generatedAt: row.generated_at,
+      generatedAt,
       snapshotHash: row.snapshot_hash,
       mapAvailable: false,
     });
@@ -629,7 +634,7 @@ export async function generateReport(
         storage_path: storagePath,
         map_storage_path: mapStoragePath,
         failure_code: null,
-        generated_at: new Date().toISOString(),
+        generated_at: generatedAt,
       })
       .eq('id', reportId)
       .eq('workspace_id', workspaceId)
