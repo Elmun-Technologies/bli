@@ -169,8 +169,16 @@ function parseSummary(value: unknown): ScoringModelSummary {
     description: asNullableString(model.description),
     status: asStatus(model.status),
     version: asNumber(model.version, 'models[].version'),
-    enabledFactorCount: asNumber(model.enabled_factor_count ?? 0, 'models[].enabled_factor_count'),
-    enabledWeightTotal: asNumber(model.enabled_weight_total ?? 0, 'models[].enabled_weight_total'),
+    // The API returns camelCase summaries; the database shape is accepted too so
+    // the same parser can read either side of the wire.
+    enabledFactorCount: asNumber(
+      model.enabledFactorCount ?? model.enabled_factor_count ?? 0,
+      'models[].enabled_factor_count',
+    ),
+    enabledWeightTotal: asNumber(
+      model.enabledWeightTotal ?? model.enabled_weight_total ?? 0,
+      'models[].enabled_weight_total',
+    ),
     updatedAt: asString(model.updated_at ?? model.updatedAt, 'models[].updated_at'),
   };
 }

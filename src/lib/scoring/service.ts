@@ -3,7 +3,6 @@ import 'server-only';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 import {
-  parseSavedCandidate,
   parseSavedCandidateList,
   parseScoringAnalysis,
   parseScoringModel,
@@ -370,7 +369,12 @@ export async function saveCandidate(
 
     if (error) throwForPostgrestError('scoring.candidates.save', 'run', error);
 
-    return parseSavedCandidate(data);
+    // `save_analysis_location` is a set-returning function, so PostgREST hands
+    // back a one-row array; the route returns the single stored candidate.
+    const [saved] = parseSavedCandidateList({ candidates: data ?? [] });
+    if (!saved) throw new ScoringQueryError('scoring.candidates.save returned no candidate.');
+
+    return saved;
   });
 }
 

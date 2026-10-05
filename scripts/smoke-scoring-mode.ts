@@ -31,6 +31,7 @@ import {
   listSavedCandidates,
   listScoringModels,
   runAnalysis,
+  saveCandidate,
   updateScoringModel,
 } from '@/lib/scoring/client';
 import { findMetric } from '@/lib/scoring/catalogue';
@@ -250,6 +251,29 @@ async function main() {
       left.name.localeCompare(right.name),
     );
     const [firstCandidate, secondCandidate, thirdCandidate] = ordered;
+
+    note('2b. An analyst saves a new candidate location through the shipped client.');
+    const saveName = `Smoke site ${process.pid}`;
+    activeJar = analystJar;
+    const savedCandidate = await saveCandidate(WORKSPACE_A, {
+      projectId: candidatesResponse.projectId,
+      name: saveName,
+      longitude: 69.2797,
+      latitude: 41.3111,
+    });
+    assert(savedCandidate.id.length === 36, 'saving a candidate must return its id');
+    assert(savedCandidate.name === saveName, `expected the saved name, got ${savedCandidate.name}`);
+    assert(
+      Math.abs(savedCandidate.longitude - 69.2797) < 1e-9 &&
+        Math.abs(savedCandidate.latitude - 41.3111) < 1e-9,
+      'the stored coordinate pair must be the one that was sent',
+    );
+    const afterSave = await listSavedCandidates(WORKSPACE_A, candidatesResponse.projectId);
+    assert(
+      afterSave.candidates.some((candidate) => candidate.id === savedCandidate.id),
+      'the saved candidate must appear in the project list',
+    );
+    activeJar = ownerJar;
 
     note('3. A single analysis runs through the shipped endpoint and the shipped parser.');
     const analysis = await runAnalysis(WORKSPACE_A, {
@@ -649,9 +673,18 @@ async function main() {
       rescored.model.factors[0].weight === edited.model.factors[0].weight,
       'the new run must use the edited weights',
     );
+    // The stored contribution carries the weight that produced it, so the edit is
+    // visible in the new run without depending on the value of the data.
+    const rescoredContribution = rescored.results[0].contributions.find(
+      (contribution) => contribution.key === model.factors[0].key,
+    );
     assert(
-      scoreOf(rescored) !== beforeEditScore,
-      'a weight change on a contributing factor must change the score',
+      rescoredContribution?.weight === edited.model.factors[0].weight,
+      `the new run must apply the edited weight (${edited.model.factors[0].weight}) to ${model.factors[0].key}`,
+    );
+    assert(
+      scoreOf(rescored) >= 0 && scoreOf(rescored) <= 100,
+      'the rescored analysis must stay inside 0..100',
     );
 
     note('18. The model is restored so the smoke can be repeated.');

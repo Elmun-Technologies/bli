@@ -20,7 +20,7 @@ import test from 'node:test';
 
 import { findMetric, formatMetricValue, formatScore, scoreBandLabel, SCORE_BANDS } from './catalogue';
 import { buildComparisonCsv, comparisonCsvFilename } from './export';
-import { parseScoringAnalysis } from './payload';
+import { parseScoringAnalysis, parseScoringModelList } from './payload';
 import type { AnalysisCandidateResult, ScoringAnalysisPayload, ScoringFactor } from './types';
 import {
   checkFactorSet,
@@ -77,6 +77,54 @@ test('the captured single-candidate payload parses into the typed contract', () 
     Number(result.contributions.reduce((total, entry) => total + entry.contribution, 0).toFixed(2)),
     result.finalScore,
   );
+});
+
+test('the model summary the API returns parses into the editor contract', () => {
+  // The exact envelope `GET /api/workspaces/{id}/scoring-models` returns. The
+  // smoke caught an earlier version of the parser reading the database shape
+  // here and silently turning every weight total into 0.
+  const apiPayload = {
+    models: [
+      {
+        id: '00000000-0000-4000-8000-000000000040',
+        workspaceId: '00000000-0000-4000-8000-000000000010',
+        name: 'Retail Expansion Model',
+        description: null,
+        status: 'active',
+        version: 1,
+        enabledFactorCount: 5,
+        enabledWeightTotal: 100,
+        updatedAt: '2026-10-05T06:02:31.165+00:00',
+      },
+    ],
+  };
+
+  const summaries = parseScoringModelList(apiPayload);
+  assert.equal(summaries.length, 1);
+  assert.equal(summaries[0].enabledFactorCount, 5);
+  assert.equal(summaries[0].enabledWeightTotal, 100);
+  assert.equal(summaries[0].workspaceId, '00000000-0000-4000-8000-000000000010');
+  assert.equal(summaries[0].version, 1);
+  assert.equal(summaries[0].updatedAt, '2026-10-05T06:02:31.165+00:00');
+
+  // A database-shaped row keeps working, and a summary without the totals is a
+  // hard zero rather than a silent partial.
+  const [fromDatabase] = parseScoringModelList({
+    models: [
+      {
+        id: '00000000-0000-4000-8000-000000000041',
+        workspace_id: '00000000-0000-4000-8000-000000000010',
+        name: 'Draft model',
+        status: 'draft',
+        version: 1,
+        enabled_factor_count: 2,
+        enabled_weight_total: 40.5,
+        updated_at: '2026-10-05T06:02:31.165+00:00',
+      },
+    ],
+  });
+  assert.equal(fromDatabase.enabledFactorCount, 2);
+  assert.equal(fromDatabase.enabledWeightTotal, 40.5);
 });
 
 test('the captured comparison payload keeps its stored order and decimals', () => {
