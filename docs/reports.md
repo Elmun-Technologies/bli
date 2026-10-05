@@ -359,6 +359,16 @@ new data or new model revision ─► run a new analysis ─► create a new rep
 The UI says so explicitly, in the reports section and in the analysis detail
 where a report is created.
 
+One field does legitimately move when a report is regenerated: the document's own
+**"report generated"** line, which states when *this PDF* was produced. Everything
+derived from the snapshot — scores, ranks, metrics, contributions, factors, the
+analysis and data-snapshot times, the hash and the map — is byte-for-byte the same
+input. The end-to-end smoke asserts exactly that distinction: it normalizes the
+report-time text, requires the rest of the extracted PDF text to be identical and
+the pagination to match, and only then allows a bounded size difference (the
+renderer's deflate stream and its own creation timestamp are not reproducible
+byte-for-byte).
+
 ---
 
 ## 14. Limitations (known, deliberate)

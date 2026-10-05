@@ -36,6 +36,7 @@ import {
   uploadReportLogo,
 } from '@/lib/reports/client';
 import { REPORT_DISCLAIMER } from '@/lib/reports/types';
+import { formatReportDate } from '@/lib/reports/view-model';
 import { formatRadius } from '@/lib/scoring/catalogue';
 import {
   getScoringModel,
@@ -124,6 +125,17 @@ function recordFailure(detail: string) {
   if (process.env.GITHUB_ACTIONS) {
     console.log(`::error title=report smoke failure::${currentScenario} — ${safe.slice(0, 900)}`);
   }
+}
+
+/** A short, sanitized "expected … / got …" context around the first difference. */
+function describeDifference(expected: string, actual: string): string {
+  let index = 0;
+  while (index < expected.length && index < actual.length && expected[index] === actual[index]) {
+    index += 1;
+  }
+  const expectedSlice = sanitizeDiagnostic(expected.slice(index, index + 60), 60);
+  const actualSlice = sanitizeDiagnostic(actual.slice(index, index + 60), 60);
+  return `first difference at ${index}: expected "${expectedSlice}", got "${actualSlice}" (lengths ${expected.length} vs ${actual.length})`;
 }
 
 function sanitizeDiagnostic(text: string, limit = 1200): string {
@@ -616,14 +628,36 @@ async function main() {
     assert(secondDownload.ok, 'the regenerated PDF must download');
     const secondBytes = new Uint8Array(await secondDownload.arrayBuffer());
     const secondText = extractPdfText(secondBytes);
-    assert(secondText === pdfText, 'regeneration must render identical content');
+    // The snapshot is frozen, but the document states *when this PDF was
+    // generated*, and regenerating legitimately refreshes that one field. The
+    // comparison normalizes exactly that text (formatted the way the view model
+    // formats it) and then requires everything else to be identical: not one
+    // stored score, rank, metric, contribution or factor label may move.
+    assert(ready.generatedAt, 'the first render must carry its report time');
+    assert(regenerated.generatedAt, 'the regenerated render must carry its report time');
+    const reportTimeText = [formatReportDate(ready.generatedAt), formatReportDate(regenerated.generatedAt)];
+    const normalizeReportTime = (text: string) =>
+      reportTimeText.reduce(
+        (current, stamp) => current.split(stamp).join('<report-time>'),
+        text,
+      );
+    assert(
+      normalizeReportTime(secondText) === normalizeReportTime(pdfText),
+      `regeneration must render identical content apart from the report time (${describeDifference(
+        normalizeReportTime(pdfText),
+        normalizeReportTime(secondText),
+      )})`,
+    );
     assert(
       pdfPageCount(secondBytes) === pages,
       'regeneration must produce the same pagination',
     );
+    // Only the deflate of the report-time text and the writer's own creation
+    // timestamp may move, and both are fixed-length; the PDF is not
+    // byte-deterministic, so the size is bounded rather than equated.
     assert(
-      secondBytes.byteLength === pdfBytes.byteLength,
-      `regeneration must produce the same size, got ${pdfBytes.byteLength} then ${secondBytes.byteLength}`,
+      Math.abs(secondBytes.byteLength - pdfBytes.byteLength) <= 128,
+      `regeneration must produce the same size apart from the report time, got ${pdfBytes.byteLength} then ${secondBytes.byteLength}`,
     );
 
     note('9. A newer model revision does not change an existing report.');
