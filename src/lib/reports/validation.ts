@@ -122,9 +122,14 @@ export interface LogoUpload {
 }
 
 /**
- * A logo must be a real PNG or JPEG under 2 MB. The declared content type is
- * only a hint: the bytes decide, and SVG (or any other scriptable format) is
- * refused outright.
+ * A logo must be a real PNG or JPEG under 2 MB.
+ *
+ * The bytes are the authority: the stored object's content type is the sniffed
+ * format, never what the caller claimed. SVG (or any other scriptable format) is
+ * refused outright, and a declaration that lies about the bytes — a PNG sent as
+ * `image/svg+xml`, or a JPEG sent as `image/png` — is refused too, so a mismatched
+ * declaration can never be mistaken for a supported format downstream. A caller
+ * that sends no content type at all is accepted on the bytes alone.
  */
 export function parseLogoUpload(bytes: Uint8Array, declaredType: string | null): LogoUpload {
   if (bytes.byteLength === 0) throw new ReportValidationError('The logo file is empty.');
@@ -136,14 +141,20 @@ export function parseLogoUpload(bytes: Uint8Array, declaredType: string | null):
   if (!sniffed) {
     throw new ReportValidationError('The logo must be a PNG or JPEG image.');
   }
-  if (declaredType && !declaredType.startsWith('image/')) {
-    throw new ReportValidationError('The logo must be a PNG or JPEG image.');
-  }
-  if (declaredType === 'image/png' && sniffed.format !== 'image/png') {
-    throw new ReportValidationError('The logo bytes are not a PNG image.');
-  }
-  if (declaredType === 'image/jpeg' && sniffed.format !== 'image/jpeg') {
-    throw new ReportValidationError('The logo bytes are not a JPEG image.');
+
+  // Parameters (`; charset=…`) are not part of the type; compare the bare type.
+  const declared = declaredType?.split(';')[0]?.trim().toLowerCase() ?? '';
+  if (declared !== '') {
+    if (declared !== 'image/png' && declared !== 'image/jpeg') {
+      throw new ReportValidationError('The logo must be a PNG or JPEG image.');
+    }
+    if (declared !== sniffed.format) {
+      throw new ReportValidationError(
+        declared === 'image/png'
+          ? 'The logo bytes are not a PNG image.'
+          : 'The logo bytes are not a JPEG image.',
+      );
+    }
   }
 
   return { bytes, mimeType: sniffed.format };

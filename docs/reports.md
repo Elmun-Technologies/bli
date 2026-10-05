@@ -265,6 +265,16 @@ Rules that hold for every provider:
   the session, the workspace membership and the row's visibility before reading
   the object **under the caller's own session**.
 
+**Logo validation.** A logo is accepted only when the bytes are a real PNG or JPEG
+under 2 MB (`sniffImage`, the same sniffer used when embedding the image). SVG and
+every other format are refused regardless of what the request claims. When the
+request declares a content type, it must be exactly `image/png` or `image/jpeg`
+(parameters such as `; charset=…` are ignored) **and** it must match the sniffed
+bytes: a PNG uploaded as `image/svg+xml`, or a JPEG uploaded as `image/png`, is
+refused with `400 invalid_request`. The content type stored on the object is
+always the sniffed format, never the declared one. A caller that sends no content
+type at all is decided on the bytes.
+
 ---
 
 ## 10. Permissions

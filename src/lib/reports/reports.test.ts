@@ -430,6 +430,16 @@ test('request validation refuses unsafe input before any database call', () => {
   assert.throws(() => parseLogoUpload(new Uint8Array([0x3c, 0x73, 0x76, 0x67]), 'image/svg+xml'), /PNG or JPEG/);
   assert.throws(() => parseLogoUpload(new Uint8Array([0x3c, 0x3f, 0x78, 0x6d]), 'image/png'), /PNG or JPEG/);
   assert.throws(() => parseLogoUpload(new Uint8Array(), 'image/png'), /empty/);
+
+  // A declaration may not lie about the bytes, in either direction.
+  assert.throws(() => parseLogoUpload(png, 'image/svg+xml'), /PNG or JPEG/);
+  assert.throws(() => parseLogoUpload(png, 'image/jpeg'), /not a JPEG/);
+  assert.throws(() => parseLogoUpload(png, 'text/plain'), /PNG or JPEG/);
+  // A matching declaration with parameters is still a PNG, and no declaration
+  // at all is decided by the bytes.
+  assert.equal(parseLogoUpload(png, 'image/png; charset=binary').mimeType, 'image/png');
+  assert.equal(parseLogoUpload(png, null).mimeType, 'image/png');
+  assert.equal(parseLogoUpload(png, '').mimeType, 'image/png');
 });
 
 test('the documented validation messages are the ones the UI shows', () => {
