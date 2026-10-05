@@ -10,6 +10,7 @@ import {
   type AnalysisState,
 } from '@/components/app/analysis-state';
 import { ComingSoon } from '@/components/app/coming-soon';
+import { ImportWizard } from '@/components/app/import-wizard';
 import { LeftSidebar, type WorkspaceSection } from '@/components/app/left-sidebar';
 import { MapLayerControl } from '@/components/app/map-layer-control';
 import { TopBar } from '@/components/app/top-bar';
@@ -53,10 +54,13 @@ const EMPTY_LAYER_COUNTS: Record<MapLayerId, number> = {
 export function AppShell({
   dataSource,
   workspaceId,
+  workspaceRole,
 }: {
   dataSource: DataSourceMode;
   /** Present only on the authenticated tenant route; absent for the public demo. */
   workspaceId?: string;
+  /** The caller's server-resolved role, used only to shape the UI. */
+  workspaceRole?: string;
 }) {
   const [activeSection, setActiveSection] = useState<WorkspaceSection>('Map');
   const [visibleLayers, setVisibleLayers] = useState<MapLayerId[]>([...MAP_LAYER_IDS]);
@@ -214,7 +218,13 @@ export function AppShell({
       <div className="workspace-column">
         <TopBar onSelectLocation={handleSearchSelect} searchLocations={searchLocations} />
 
-        {activeSection === 'Map' ? (
+        {activeSection === 'Import' && workspaceId ? (
+          <ImportWizard
+            canWrite={workspaceRole === 'owner' || workspaceRole === 'admin' || workspaceRole === 'analyst'}
+            onViewOnMap={() => setActiveSection('Map')}
+            workspaceId={workspaceId}
+          />
+        ) : activeSection === 'Map' ? (
           <main className="map-workspace">
             <section aria-label="Tashkent map workspace" className="map-stage">
               <MapView

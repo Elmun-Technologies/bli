@@ -78,6 +78,29 @@ Observed in the clean CI run `37218349921` (PostgreSQL 17.11, PostGIS 3.3.7, ~40
 
 GeoJSON is produced from explicit X/Y extraction of the geography's geometry cast rather than `ST_AsGeoJSON` in the RPC, keeping the SQL projection narrow and the DTO construction in one place. The fixture adapter (`DATA_SOURCE=fixtures`) remains display-only and never feeds analysis.
 
+## Imported points and provenance (Phase 5)
+
+Phase 5 writes into the same `extensions.geography(Point,4326)` column with the
+same GiST index and the same `ST_DWithin` query patterns — imports change where
+the rows come from, not how the spatial model works. Three properties are worth
+knowing:
+
+- **Coordinates are validated before they are stored.** The staging table enforces
+  all-or-nothing finite in-range coordinates, so a malformed or swapped pair can
+  never reach the geography column; a suspected swap is reported to the user and
+  never silently corrected.
+- **Every imported record carries provenance.** `import_job_id` and
+  `source_row_number` answer which upload and which spreadsheet row created the
+  record, so a questionable point can be traced back to the file that produced
+  it. The composite foreign keys keep that reference inside the same workspace.
+- **Geocoded points are stored results, not live lookups.** A committed point is a
+  value in the database; the map still reads points through the viewport RPCs, and
+  a geocoding provider outage never affects map rendering.
+
+Manual placement is a stored, authoritative coordinate with `manual_override = true`
+on the staged row — the same rule as map clicks: nothing is persisted until a user
+explicitly saves it.
+
 ## Geometry boundary
 
 Use geography for authoritative point storage and meter-distance filtering. For future polygon territory/intersection work:

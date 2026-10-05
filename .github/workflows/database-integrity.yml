@@ -49,7 +49,7 @@ jobs:
           sudo apt-get install --yes postgresql-client
           psql --version
 
-      - name: Clean-reset Supabase/PostGIS, seed synthetic demo, run Phase 2/3/4 assertions, and generate types
+      - name: Clean-reset Supabase/PostGIS/Storage, seed synthetic demo, run Phase 2/3/4/5 assertions, and generate types
         id: verify_database
         run: npm run verify:database
 
@@ -162,6 +162,14 @@ jobs:
 
       - name: Authenticated end-to-end smoke (session, membership, tenant GIS, demo isolation)
         run: npm run smoke:auth
+
+      - name: Import end-to-end smoke (upload, mapping, validation, fake geocoder, commit, GIS visibility)
+        run: npm run smoke:imports
+
+      - name: Import smoke failure diagnostics
+        if: failure()
+        run: |
+          printf '::notice title=import smoke::the smoke prints the failing scenario and the server log tail; geocoding runs on GEOCODING_PROVIDER=fake, so CI needs no Mapbox token and spends no geocoding credits.\n'
 
       - name: Stop local Supabase stack
         if: always()

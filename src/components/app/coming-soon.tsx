@@ -13,6 +13,10 @@ const SECTION_DETAILS: Record<WorkspaceSection, { phase: string; description: st
     phase: 'Phase 1 · available now',
     description: 'Explore the interactive Tashkent pilot map and its sample layers.',
   },
+  Import: {
+    phase: 'Phase 5',
+    description: 'Upload CSV and XLSX files, map their columns, validate every row and geocode addresses here.',
+  },
   Customers: {
     phase: 'Phase 5',
     description: 'Customer uploads, validation, privacy controls, clustering and heatmaps are planned here.',

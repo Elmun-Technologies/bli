@@ -1,6 +1,39 @@
 # Deployment and security notes
 
-## Phase 4 deployment gate
+## Phase 5 deployment gate
+
+Phase 5 adds CSV/XLSX imports, private source-file storage and geocoding. Before
+deploying it:
+
+1. Ensure the clean-reset workflow is green **including**
+   `supabase/tests/phase5_import_rls.sql`, `supabase/tests/phase5_geocoding.sql`,
+   the generated-type drift check and all three end-to-end smokes.
+2. Apply the Phase 5 migrations in timestamp order
+   (`20261005050000` → `20261005080000`). The storage migration writes to
+   `storage.buckets`/`storage.objects`, so it must run in a project where the
+   Supabase Storage schema exists — it fails loudly otherwise.
+3. **Geocoding is opt-in.** Either set `MAPBOX_ACCESS_TOKEN` (server-only, never
+   `NEXT_PUBLIC_*`) plus optional `GEOCODING_COUNTRY_CODE`/`GEOCODING_PROXIMITY`
+   for the pilot market, or leave geocoding unconfigured — in that case address-only
+   rows report `503 geocoding_unavailable` and supplied coordinates still import
+   normally. There is no Google default and no fallback provider.
+4. **Mapbox terms are enforced in code:** the provider always sends
+   `permanent=true`, because Phase 5 stores geocoded coordinates in a dataset.
+   Do not change that flag; a temporary result may not be persisted.
+5. **Review the geocoding thresholds** against real pilot data
+   (`GEOCODING_ACCEPT_THRESHOLD`, `GEOCODING_REVIEW_THRESHOLD`,
+   `GEOCODING_AMBIGUITY_DELTA`). The defaults are conservative on purpose:
+   ambiguous or country-mismatched candidates always require a human decision.
+6. **Decide the retention policy for source files.** Phase 5 keeps them for the
+   lifetime of the import job and ships no lifecycle automation; the storage
+   `DELETE` policy is what an operator or a later retention job would use.
+7. **Keep `GEOCODING_PROVIDER=fake` out of production.** It exists for tests and
+   CI only; the CI workflow sets it explicitly and the smoke passes it on to the
+   server process.
+8. Never deploy `supabase/seed.sql` or the deterministic `*@example.test`
+   identities to a project with real users.
+
+### Phase 4 deployment gate
 
 Phase 4 adds authentication and workspace membership. Before deploying it:
 
@@ -112,7 +145,27 @@ Customer names, phone numbers, addresses and revenue are sensitive. Use explicit
 
 Do not extend the customer map DTO with PII and never pass raw database rows to MapLibre.
 
-Current fixtures are synthetic and no external data feeds are loaded. Before any real customer import, define lawful purpose, consent/legal basis, retention/deletion, data provenance, access roles, backup handling and audit requirements. Those policies are not inferred or implemented by this schema.
+Phase 5 makes real customer imports possible, so the PII boundary now has a
+write path as well as a read path:
+
+- Imported customer rows carry name, phone, address and revenue. The map DTO
+  rules above are unchanged and apply to imported data automatically, because
+  committed rows reach the map through the same Phase 3/4 projection.
+- Import previews, exports and mapping screens are membership-scoped API
+  responses with `Cache-Control: no-store`; they are not public and are not the
+  map payload.
+- Geocoding sends the address text (and only the address text) to the configured
+  provider. Do not enable geocoding for a dataset whose addresses are themselves
+  regulated, unless the provider terms are acceptable for that data.
+- Before loading real customer data, define lawful purpose, consent/legal basis,
+  retention/deletion, data provenance, access roles, backup handling and audit
+  requirements. `import_jobs` now gives an audit header per upload (who, when,
+  which file, which destination, exact counts), but it is not a substitute for a
+  full compliance process.
+- Source files are stored in a private bucket and are reachable only by
+  owner/admin/analyst members of that workspace; deleting a job cascades its
+  staged rows but does not delete the promoted business records or the stored
+  source file.
 
 ## Migration and operational practice
 
@@ -123,7 +176,25 @@ Current fixtures are synthetic and no external data feeds are loaded. Before any
 - Validate actual query plans and GiST selectivity with realistic, privacy-safe data before promising latency.
 - Keep SQL test fixtures synthetic and transactionally rolled back.
 - Re-run the Phase 3 isolation assertions after any change to the demo RPCs, the seed data or the workspace resolver: they are the proof that demo queries cannot read another workspace.
+- Re-run the Phase 5 storage suite after any change to the bucket policies: it is the proof that a malformed object path grants nothing and that an object of another workspace is invisible.
 - Confirm the spatial index probes still show GiST participation after query-shape changes; do not infer index health from DDL alone.
+
+## Post-Phase-5 operational checklist
+
+1. **Watch the private bucket.** `workspace-imports` has a 5 MB per-object limit
+   and no lifecycle rule; decide when source files should be removed and who may
+   do it.
+2. **Geocoding cost and quota.** Each geocoding batch bills one request per row
+   against the Mapbox account, driven by user actions (there is no background
+   job). Monitor usage and keep `GEOCODING_PROVIDER=fake` out of production.
+3. **Operator readiness.** The import wizard is available to owner/admin/analyst
+   members; viewers are read-only, enforced by both RLS and the routes. Provide
+   the destination dataset before a large import, or let an owner/admin create
+   one during the commit.
+4. **Re-run the Phase 5 suites** (`phase5_import_rls.sql`, `phase5_geocoding.sql`)
+   after any change to the import tables, the storage policies or the workflow
+   functions; the storage suite is the proof that a path never authorizes by
+   itself.
 
 ## Post-Phase-4 operational checklist
 

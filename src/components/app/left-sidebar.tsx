@@ -11,6 +11,7 @@ import {
   MapPinHouse,
   Settings2,
   Store,
+  Upload,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
@@ -18,6 +19,7 @@ import {
 export type WorkspaceSection =
   | 'Dashboard'
   | 'Map'
+  | 'Import'
   | 'Customers'
   | 'Locations'
   | 'Competitors'
@@ -35,6 +37,7 @@ interface NavigationItem {
 const MAIN_NAVIGATION: NavigationItem[] = [
   { label: 'Dashboard', icon: Gauge, phase: 'Later' },
   { label: 'Map', icon: Map, phase: undefined },
+  { label: 'Import', icon: Upload, phase: undefined },
   { label: 'Customers', icon: UsersRound, phase: 'Phase 5' },
   { label: 'Locations', icon: MapPinHouse, phase: 'Phase 6' },
   { label: 'Competitors', icon: Store, phase: 'Phase 2' },

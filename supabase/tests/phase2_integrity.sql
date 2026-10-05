@@ -99,7 +99,8 @@ BEGIN
   -- Explicitly assert every required table exists in the public schema.
   FOREACH table_name IN ARRAY ARRAY[
     'organizations', 'workspaces', 'projects', 'datasets', 'project_datasets',
-    'locations', 'customers', 'competitors', 'branches', 'analysis_locations'
+    'locations', 'customers', 'competitors', 'branches', 'analysis_locations',
+    'workspace_members', 'import_jobs', 'import_rows'
   ] LOOP
     IF NOT EXISTS (
       SELECT 1
@@ -113,7 +114,7 @@ BEGIN
       RAISE EXCEPTION 'Required table public.% is missing', table_name;
     END IF;
   END LOOP;
-  RAISE NOTICE 'All ten expected public tables exist';
+  RAISE NOTICE 'All thirteen expected public tables exist (ten tenant tables, workspace_members and the two import staging tables)';
 
   -- Verify every authoritative point column is geography(Point,4326), not an
   -- untyped geometry or a second latitude/longitude representation.
@@ -177,7 +178,7 @@ BEGIN
   FOREACH table_name IN ARRAY ARRAY[
     'organizations', 'workspaces', 'workspace_members', 'projects', 'datasets',
     'project_datasets', 'locations', 'customers', 'competitors', 'branches',
-    'analysis_locations'
+    'analysis_locations', 'import_jobs', 'import_rows'
   ] LOOP
     SELECT relation.relrowsecurity
       INTO rls_enabled
@@ -298,6 +299,69 @@ BEGIN
       RAISE EXCEPTION 'public.% has a policy without its matching authenticated privilege', table_name;
     END IF;
   END LOOP;
+  -- Storage is a second RLS surface with its own policies. The import bucket
+  -- must stay private, and every import policy must be scoped to authenticated
+  -- (never PUBLIC/anon) and must not be a blanket rule.
+  IF pg_catalog.to_regclass('storage.objects') IS NOT NULL THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM storage.buckets WHERE id = 'workspace-imports' AND public = false
+    ) THEN
+      RAISE EXCEPTION 'The workspace-imports bucket is missing or public';
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_class AS relation
+        JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       WHERE namespace.nspname = 'storage' AND relation.relname = 'objects'
+         AND relation.relrowsecurity
+    ) THEN
+      RAISE EXCEPTION 'RLS is not enabled on storage.objects';
+    END IF;
+
+    IF (SELECT pg_catalog.count(*) FROM pg_catalog.pg_policy AS policy
+          JOIN pg_catalog.pg_class AS relation ON relation.oid = policy.polrelid
+          JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+         WHERE namespace.nspname = 'storage' AND relation.relname = 'objects'
+           AND policy.polname LIKE 'workspace_imports_%') < 4 THEN
+      RAISE EXCEPTION 'The workspace-imports storage policies are incomplete';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1 FROM pg_catalog.pg_policy AS policy
+        JOIN pg_catalog.pg_class AS relation ON relation.oid = policy.polrelid
+        JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       WHERE namespace.nspname = 'storage' AND relation.relname = 'objects'
+         AND policy.polname LIKE 'workspace_imports_%'
+         AND (
+           policy.polroles <> ARRAY[
+             (SELECT role.oid FROM pg_catalog.pg_roles AS role WHERE role.rolname = 'authenticated')
+           ]::oid[]
+           OR (policy.polqual IS NULL AND policy.polwithcheck IS NULL)
+           OR pg_catalog.pg_get_expr(policy.polqual, policy.polrelid) = 'true'
+           OR pg_catalog.pg_get_expr(policy.polwithcheck, policy.polrelid) = 'true'
+         )
+    ) THEN
+      RAISE EXCEPTION 'A storage policy is not narrowly scoped to authenticated';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1 FROM pg_catalog.pg_policy AS policy
+        JOIN pg_catalog.pg_class AS relation ON relation.oid = policy.polrelid
+        JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+       WHERE namespace.nspname = 'storage' AND relation.relname = 'objects'
+         AND policy.polname LIKE 'workspace_imports_%'
+         AND (
+           SELECT role.oid FROM pg_catalog.pg_roles AS role WHERE role.rolname = 'anon'
+         ) = ANY (policy.polroles)
+    ) THEN
+      RAISE EXCEPTION 'A storage policy grants anon access to import files';
+    END IF;
+
+    RAISE NOTICE 'Storage posture verified: private import bucket, member-scoped non-blanket policies, no anon access';
+  ELSE
+    RAISE NOTICE 'storage.objects is absent (non-Supabase database): storage posture checks skipped';
+  END IF;
+
   RAISE NOTICE 'RLS enabled everywhere, policies exist only for authenticated, no blanket policy, anon has zero privileges, authenticated has no TRUNCATE/REFERENCES/TRIGGER';
 
   -- Build two tenants and valid same-workspace rows.

@@ -12,20 +12,24 @@
     "start": "next start --hostname 0.0.0.0",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/geo/*.test.ts src/lib/domain/*.test.ts src/lib/map/*.test.ts src/lib/spatial/*.test.ts src/components/app/*.test.ts",
+    "test": "tsx --test src/lib/geo/*.test.ts src/lib/domain/*.test.ts src/lib/map/*.test.ts src/lib/spatial/*.test.ts src/lib/imports/*.test.ts src/lib/imports/parse/*.test.ts src/lib/imports/geocoding/*.test.ts src/components/app/*.test.ts",
     "smoke:fixtures": "tsx scripts/smoke-fixtures-mode.ts",
     "smoke:auth": "tsx scripts/smoke-auth-mode.ts",
     "verify:database": "bash scripts/verify-database.sh",
-    "verify": "npm run verify:database && npm test && npm run lint && npm run typecheck && npm run build && npm run smoke:fixtures"
+    "verify": "npm run verify:database && npm test && npm run lint && npm run typecheck && npm run build && npm run smoke:fixtures",
+    "smoke:imports": "tsx scripts/smoke-import-mode.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
+    "csv-parse": "7.0.3",
+    "csv-stringify": "6.9.0",
     "lucide-react": "^0.468.0",
     "maplibre-gl": "^6.12.0",
     "next": "^16.3.8",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "read-excel-file": "9.3.10"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

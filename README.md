@@ -2,7 +2,7 @@
 
 A modular Web GIS and location-intelligence workspace for commercial site selection, customer coverage and market analysis. The first pilot is Tashkent, Uzbekistan; the application architecture is city- and country-agnostic.
 
-> **Phase 4 (Supabase Auth + workspace membership + production RLS) is implemented; the clean database gate is green in GitHub Actions.** Two separate trust models now exist side by side. The public synthetic demo (`/api/demo/*`) is unchanged: display-safe PostGIS viewport features and `ST_DWithin` radius aggregates for the fixed demo workspace, served with a server-only elevated credential. The tenant path is new: email/password sign-in, server-validated sessions, a protected `/workspaces/[workspaceId]` route whose membership and role are resolved in the database, and authenticated viewport/analytic endpoints that run under the caller's own RLS-aware session. Owner/admin/analyst/viewer permissions are enforced by PostgreSQL policies and grants, never by the UI. Local database execution is unavailable in this workspace; CI is the verified database environment.
+> **Phase 5 (CSV/XLSX import, validation and geocoding) is implemented; Phases 1-4 are frozen and the clean database gate is green in GitHub Actions.** The public synthetic demo (`/api/demo/*`) is unchanged: display-safe PostGIS viewport features and `ST_DWithin` radius aggregates for the fixed demo workspace, served with a server-only elevated credential. The tenant path is unchanged too: email/password sign-in, server-validated sessions, a protected `/workspaces/[workspaceId]` route whose membership and role are resolved in the database, and authenticated viewport/analytic endpoints that run under the caller's own RLS-aware session. Phase 5 adds a six-step import wizard (upload, columns, mapping, validation, geocoding, commit) on top of the same trust model: a private per-workspace storage bucket, staging tables (`import_jobs`, `import_rows`), owner/admin/analyst-only writes, provider-abstracted geocoding that is Mapbox-permanent-only in production and a deterministic fake in CI, and a transactional commit that promotes validated rows into `customers`/`locations` with provenance. Bad rows are never silently discarded. Local database execution is unavailable in this workspace; CI is the verified database environment.
 
 ## Current capabilities
 
@@ -17,6 +17,7 @@ A modular Web GIS and location-intelligence workspace for commercial site select
 - **Phase 4 authentication:** minimal email/password sign-in (`/sign-in`, `POST /api/auth/sign-in`), server-side sign-out, a session refreshed by `src/proxy.ts`, and safe error messages only (`Invalid email or password.`, `You do not have access to this workspace.`, `Session expired. Please sign in again.`). No signup funnel, password reset, OAuth, magic links or profile settings.
 - **Phase 4 membership:** `workspace_members` maps auth users to workspaces with a role (`owner`, `admin`, `analyst`, `viewer`). The workspace selector lists only memberships the database returns for the caller.
 - **Phase 4 tenant GIS:** `GET /api/workspaces/[workspaceId]/map/features` and `POST /api/workspaces/[workspaceId]/analysis/radius` validate the session, resolve membership, then execute a membership-asserting RPC under the caller's own session. A foreign workspace id and a non-existent one return the identical `403` body.
+- **Phase 5 imports:** `POST /api/workspaces/[workspaceId]/imports` and its `file`, `mapping`, `geocode-batch`, `commit`, `rows`, `rows/{rowId}/point` and `errors.csv` children. CSV/XLSX uploads are sniffed by content (never MIME), stored in the private `workspace-imports` bucket and staged; every row ends `valid`, `needs_geocoding` or `invalid` with a machine-readable code, and nothing reaches a production table until an explicit, transactional, idempotent commit.
 
 ## Phase 4 authentication, membership and RLS
 
@@ -28,6 +29,18 @@ A modular Web GIS and location-intelligence workspace for commercial site select
 - **First owner:** `public.bootstrap_workspace_owner(...)` (service_role-only, validated, idempotent) creates an organization, workspace and its first owner atomically for production; CI/dev uses deterministic seed identities instead. There is no signup funnel and no invitation email.
 
 The policy-by-policy and grant-by-grant reference, the elevated-credential inventory and the security test strategy live in [docs/auth-security.md](docs/auth-security.md).
+
+## Phase 5 imports (CSV/XLSX → validated data)
+
+- **Flow:** upload → inspect columns → map → validate → accept supplied coordinates → geocode address-only rows → preview → commit into a workspace dataset → view on the map.
+- **Formats and limits:** `.csv` and `.xlsx` only, 5 MB, 10 000 rows, 100 columns, one selected sheet. The file type is decided by content (extension and MIME are never trusted); exceeding a limit rejects the whole file — never a silent partial import.
+- **Mapping:** multilingual suggestions (Uzbek Latin, Russian/Cyrillic, English) for name, phone, address, latitude/longitude, revenue, orders, segment and id; every column stays editable.
+- **Validation:** decimal-safe money (`numeric(18,2)`, never float equality), text-preserving phone numbers, ISO/`d/m/yyyy` dates, finite in-range coordinates, deterministic `external_id` duplicate detection, and a `coordinate_swap_suspected` warning — coordinates are **never** swapped automatically.
+- **Geocoding:** a `GeocodingProvider` abstraction; the only production provider is Mapbox Geocoding v6 with `permanent=true` (results must be storable). Confidence thresholds decide accepted / review / rejected, ambiguous candidates require a human decision, and manual placement (`manual_override`) is authoritative. Batches are bounded (≤ 50), resumable, lease-based and idempotent — no background worker. CI uses the deterministic fake provider, so no build needs a token.
+- **Commit:** a new or explicitly selected dataset of the same workspace, in one transaction, reporting exact counts; duplicate `external_id` rows are marked invalid and stay staged; replaying the commit inserts nothing and re-pointing it at another dataset is refused.
+- **Safety:** private storage bucket with membership-scoped policies (a path never authorizes by itself), no `service_role` anywhere in the tenant import path, safe error codes only, and a formula-injection-safe CSV export of failed rows.
+
+Details: [docs/imports.md](docs/imports.md) and [docs/geocoding.md](docs/geocoding.md).
 
 ## Phase 2 database foundation (unchanged)
 
@@ -57,7 +70,8 @@ The ordered migrations add:
 - it runs the live Phase 2 catalog/integrity assertions, the Phase 3 spatial/index assertions and the Phase 4 membership/RLS/grant assertions with fail-fast `psql` (PostgreSQL 17.11, PostGIS 3.3.7 in CI);
 - it regenerates `src/lib/database/database.types.ts` and fails on drift;
 - it runs `npm test`, lint, typecheck and the production build;
-- it runs both end-to-end smokes: the fixtures smoke and the authenticated smoke, which signs in through the shipped `/api/auth/sign-in` route and then exercises the protected page, the selector, both tenant GIS endpoints, workspace-id tampering, cross-workspace denial, the still-public demo endpoint and sign-out against the shipped production build.
+- it runs the Phase 5 import assertions: upload to the private bucket, mapping, per-row validation, a fake-provider geocoding batch, the error export, commit idempotency and re-point refusal, plus the storage/RLS grant matrix;
+- it runs three end-to-end smokes against the shipped production build: the fixtures smoke, the authenticated smoke (sign-in, protected page, selector, both tenant GIS endpoints, workspace-id tampering, cross-workspace denial, the still-public demo endpoint, sign-out) and the import smoke (wizard client → API → storage → staging → commit → map visibility).
 
 **A green TypeScript build alone does not validate SQL.** See [docs/setup.md](docs/setup.md).
 
@@ -76,7 +90,7 @@ src/
   app/                 App Router entry point, metadata and global styles
     api/demo/          Public demo viewport + radius route handlers
     api/auth/          Minimal sign-in and sign-out route handlers
-    api/workspaces/    Authenticated tenant viewport + radius route handlers
+    api/workspaces/    Authenticated tenant viewport, radius, import and dataset route handlers
     sign-in/           Sign-in page
     workspaces/        Workspace selector and the protected workspace page
   components/
@@ -87,6 +101,7 @@ src/
     data/              Synthetic Tashkent fixtures (display-only fallback)
     domain/            Validated coordinates and domain types
     database/          Generated Supabase types and server-side row aliases
+    imports/           Parsers, mapping, normalization, validation, geocoding, service, HTTP mapping
     geo/               Visual circle geometry and tests
     map/               PII-safe GeoJSON adapter and tests
     spatial/           DTOs, validation, client fetchers, demo resolver, tenant service
@@ -94,9 +109,9 @@ src/
   proxy.ts             Supabase session refresh (Next 16 proxy convention)
 supabase/
   config.toml
-  migrations/          Ordered Phase 1–4 SQL migrations
+  migrations/          Ordered Phase 1-5 SQL migrations
   seed.sql             Deterministic synthetic demo, isolation workspace and local auth users
-  tests/               Rollback-only Phase 2/3/4 database assertions
+  tests/               Rollback-only Phase 2/3/4/5 database assertions
 docs/
   architecture.md
   auth-security.md
@@ -133,6 +148,7 @@ npm run typecheck
 npm run build
 npm run smoke:fixtures   # needs no database
 npm run smoke:auth       # needs a running, seeded local Supabase and its credentials
+npm run smoke:imports    # needs the same; geocoding runs on the deterministic fake provider
 ```
 
 ## Environment variables
@@ -145,6 +161,11 @@ npm run smoke:auth       # needs a running, seeded local Supabase and its creden
 | `SUPABASE_ANON_KEY` | No for the UI preview | Publishable/anon key for the cookie-aware SSR client factory. |
 | `SUPABASE_SECRET_KEY` | Yes for database mode | Server-only elevated key for the demo spatial RPCs (preferred). |
 | `SUPABASE_SERVICE_ROLE_KEY` | Legacy alternative | Server-only compatibility fallback when the project has no secret key. |
+| `GEOCODING_PROVIDER` | No | `mapbox` (default) or `fake`. CI and the import smoke use `fake`; there is no Google default. |
+| `MAPBOX_ACCESS_TOKEN` | Yes to geocode | Server-only Mapbox token used with `permanent=true`. Missing token → geocoding reports `503 geocoding_unavailable`. |
+| `GEOCODING_COUNTRY_CODE` / `GEOCODING_COUNTRY_NAME` | No | Country filter/bias for the provider (e.g. `uz`); the Tashkent bias is configuration, not code. |
+| `GEOCODING_PROXIMITY` / `GEOCODING_LANGUAGE` | No | `longitude,latitude` proximity bias and IETF language for returned addresses. |
+| `GEOCODING_ACCEPT_THRESHOLD` / `GEOCODING_REVIEW_THRESHOLD` / `GEOCODING_AMBIGUITY_DELTA` | No | Confidence policy (defaults `0.85` / `0.45` / `0.1`). |
 
 Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/admin.ts` from a Client Component, and never log either key. `SUPABASE_ANON_KEY` is required for sign-in and the authenticated routes; the elevated key is used only by the public demo path, the operator bootstrap and CI setup. RLS is enabled everywhere with member-scoped policies: a policy never replaces a `GRANT`, and both layers are asserted in CI.
 
@@ -154,7 +175,7 @@ Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/ad
 2. **Phase 2 / 2.5 — ownership/spatial schema and clean database gate (implemented):** workspace-safe tables, PostGIS geography, constraints/indexes, default-deny RLS, generated types, CI verification.
 3. **Phase 3 — DB-backed demo map and radius analysis (implemented):** server-side viewport features, PostGIS `ST_DWithin` radius aggregates, safe DTOs, demo-workspace boundary, server-only elevated credential.
 4. **Phase 4 — authentication and membership (implemented):** Supabase Auth email/password sign-in, `workspace_members` roles, deliberate per-table RLS policies with explicit grants, membership-checked tenant GIS RPCs, a protected workspace route and a minimal selector. The fixed demo path is unchanged.
-5. **Phase 5 — data operations (not started):** validated imports, provenance, privacy/retention controls and customer layers.
+5. **Phase 5 — data operations (implemented):** CSV/XLSX imports with column mapping, per-row validation, provenance, private storage, provider-abstracted geocoding (Mapbox permanent results, fake provider in CI), manual placement, transactional commit and a safe error export.
 6. **Phase 6 — intelligence (not started):** configurable, explainable scores and candidate comparison.
 7. **Phase 7 — reporting, tiles and optimization (not started):** vector tiles/`ST_AsMVT` at larger scale, exports and performance work.
 
@@ -166,3 +187,5 @@ Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/ad
 - [GIS concepts and spatial decisions](docs/gis-concepts.md)
 - [Local development and Supabase setup](docs/setup.md)
 - [Deployment checklist and security gates](docs/deployment.md)
+- [Imports: formats, limits, geocoding and commit](docs/imports.md)
+- [Geocoding providers, Mapbox v6 and confidence policy](docs/geocoding.md)

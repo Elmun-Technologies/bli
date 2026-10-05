@@ -11,10 +11,11 @@ BLI is a location-intelligence workspace for business users: select an analysis 
 - **Phase 2.5 — verification gate implemented:** pinned CLI, clean-reset script, live catalog/integrity assertions, generated types and GitHub Actions coverage.
 - **Phase 3 — implemented:** database-backed demo map (viewport features), server-side PostGIS radius analysis, safe DTOs, server-only elevated credential, deterministic synthetic seed, cross-workspace isolation assertions.
 - **Phase 4 — implemented:** Supabase Auth (email/password) with a minimal sign-in/sign-out surface, `workspace_members` with an owner/admin/analyst/viewer role enum, deliberate per-table RLS policies for `authenticated`, an explicit grant matrix, membership- and RLS-checked tenant viewport/radius RPCs, a protected `/workspaces/[workspaceId]` route and a membership-only workspace selector. The public demo path is unchanged.
+- **Phase 5 — implemented:** a six-step import pipeline (upload → columns → mapping → validation → geocoding → commit) for CSV/XLSX files: content-sniffed parsing, multilingual column mapping, deterministic per-row validation with machine-readable errors, private storage with membership-scoped policies, a provider-abstracted geocoder (Mapbox Geocoding v6 permanent-only in production, a deterministic fake in CI), bounded resumable batches, manual placement, a transactional idempotent commit with provenance into `customers`/`locations`, and a formula-safe error export. No `service_role` is used anywhere in the tenant import path.
 - **LOCAL DATABASE NOT VERIFIED:** Docker and `psql` are unavailable in this workspace; local app checks do not substitute for the CI database gate.
-- **NOT STARTED:** imports, geocoding, scoring, heatmaps, reports, routing, territories, server-side vector tiles, workspace invitations and administrative UI beyond the minimal selector.
+- **NOT STARTED:** scoring, heatmaps, reports, routing, territories, server-side vector tiles, workspace invitations, administrative UI beyond the minimal selector, imports into other entity types, background workers and retention automation.
 
-See [database.md](database.md) for migration/schema/RLS detail, [auth-security.md](auth-security.md) for the Phase 4 trust model and [setup.md](setup.md) for verification instructions.
+See [database.md](database.md) for migration/schema/RLS detail, [auth-security.md](auth-security.md) for the Phase 4 trust model, [imports.md](imports.md) and [geocoding.md](geocoding.md) for Phase 5 and [setup.md](setup.md) for verification instructions.
 
 ## Phase 3 data flow
 
@@ -161,6 +162,28 @@ The authoritative point representation remains one `extensions.geography(Point,4
 - Antimeridian-crossing viewports are rejected in this phase. Global antimeridian support is future work; the demo area is Tashkent.
 - Server-side vector tile clustering (`ST_AsMVT`/PMTiles) is out of scope; MapLibre clustering over capped viewport data is the Phase 3 approach.
 
+## Phase 5 data flow (import → commit → map)
+
+```text
+browser wizard (Import section)
+  POST /imports                     → import_jobs row (uploaded)
+  POST /imports/{id}/file           → private bucket {workspace}/{import}/source.ext
+                                    → content sniffing → headers/sheets stored on the job
+  POST /imports/{id}/mapping        → download under the caller's own session
+                                    → map columns → validate rows → upsert import_rows (staged)
+  POST /imports/{id}/geocode-batch  → claim_import_geocoding_rows (lease, ≤50)
+                                    → GeocodingProvider (Mapbox v6 permanent | fake)
+                                    → apply_import_geocoding_results (idempotent)
+  POST /imports/{id}/rows/{row}/point → set_import_row_manual_point (manual_override)
+  POST /imports/{id}/commit         → commit_import_job: one transaction, exact counts,
+                                      provenance columns, idempotent when replayed
+                                    → customers/locations → existing tenant viewport RPCs
+```
+
+Every step runs through the cookie-aware authenticated client, so RLS and the role checks are enforced by PostgreSQL, not by the route handlers. The map layer is untouched: committed customers and locations reach it through the same Phase 3/4 viewport DTOs, so the PII allow-list still decides what the map may see.
+
+Import state is the staging tables plus the job row; there is no queue and no worker, so an interrupted geocoding run resumes from where it stopped rather than restarting or losing work.
+
 ## Caching policy
 
 Spatial results depend on live demo data, the viewport and the radius. Both route handlers are `dynamic = 'force-dynamic'`, `revalidate = 0`, and return `Cache-Control: no-store`; client fetches use `cache: 'no-store'`. Radius analysis is a `POST` and is never cached, so a result can never be served for a different coordinate or radius. No cache-invalidation system is introduced in this phase.
@@ -180,18 +203,23 @@ src/
   lib/geo/                         Circle geometry helper and unit tests
   lib/map/                         PII-safe GeoJSON adapter and tests
   lib/spatial/                     DTOs, validation, service, client, fixtures adapter
+  lib/imports/                     Limits, parsers, mapping, normalization, validation,
+                                   geocoding (provider abstraction + batch runner),
+                                   export, service (staging/commit), route guard, HTTP mapping
   lib/supabase/                    server.ts (anon SSR) and admin.ts (server-only elevated)
 supabase/
-  migrations/                      Ordered Phase 1–3 SQL migrations
+  migrations/                      Ordered Phase 1-5 SQL migrations
   seed.sql                         Deterministic synthetic demo data (not a migration)
   tests/phase2_integrity.sql       Phase 2 catalog/integrity assertions (rollback-only)
   tests/phase3_spatial_queries.sql Phase 3 spatial/RPC/isolation assertions (rollback-only)
+  tests/phase4_membership_rls.sql  Phase 4 membership/RLS/grant assertions (rollback-only)
+  tests/phase5_import_rls.sql      Phase 5 import, storage, commit and grant assertions
+  tests/phase5_geocoding.sql       Phase 5 geocoding batch/resume/idempotency assertions
 ```
 
-## Future architecture checkpoints (not Phase 3 deliverables)
+## Future architecture checkpoints (not Phase 5 deliverables)
 
-- Add a `workspace_members` relationship and authentication/role-aware RLS before any client-visible persistence path, then generalize `resolveWorkspaceContext()`.
-- Regenerate database types after migrations have actually applied to the clean local/CI schema.
-- Define stable external IDs, data lineage, retention and import validation before real customer data is loaded.
 - Revisit server-side tiles/clustering only after measuring viewport volume at realistic data sizes.
 - Add analytics/scoring only after product definitions and a server-side query contract are agreed.
+- Retention automation (lifecycle rules on the import bucket) when an operator decides a policy; Phase 5 leaves source files for the lifetime of the job.
+- Streaming/resumable uploads and per-row editing only when a real need for files beyond 5 MB or 10 000 rows appears; the staging pipeline is already reusable for further target entities.

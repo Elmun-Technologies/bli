@@ -97,7 +97,7 @@ Generated Supabase row types are persistence-only. `row-types.ts` now aliases ge
 
 ## Current local verification status
 
-The project CLI is installed and reports `2.119.0`, but Docker and `psql` are unavailable in this workspace, so local database startup, migration replay and catalog assertions have not run here. GitHub Actions is the authoritative live PostgreSQL/PostGIS verification path and is green for Phase 4: the clean-reset job replayed every migration, ran the Phase 2, Phase 3 and Phase 4 suites, regenerated and checked the database types, and both end-to-end smokes (fixtures and authenticated) passed against the production build. Runtime observations from CI have reported PostgreSQL `17.11` and PostGIS extension/library `3.3.7`; use versions printed by an actual run rather than researched or expected values.
+The project CLI is installed and reports `2.119.0`, but Docker and `psql` are unavailable in this workspace, so local database startup, migration replay and catalog assertions have not run here. GitHub Actions is the authoritative live PostgreSQL/PostGIS verification path and is green for Phase 4: the clean-reset job replayed every migration, ran the Phase 2, Phase 3 and Phase 4 suites, regenerated and checked the database types, and both end-to-end smokes (fixtures and authenticated) passed against the production build. Runtime observations from CI have reported PostgreSQL `17.11` and PostGIS extension/library `3.3.7`; use versions printed by an actual run rather than researched or expected values. Phase 5 extends the same gate: the stack now also starts the Storage API, the Phase 5 import and geocoding suites run against the same fresh database, and the import smoke exercises the whole pipeline against the production build with `GEOCODING_PROVIDER=fake`.
 
 ## Demo data and the workspace boundary
 
@@ -115,11 +115,34 @@ npm run lint
 npm run typecheck
 npm run build
 npm run smoke:fixtures
+# with a running, seeded local Supabase (see below) and its credentials in the environment:
+npm run smoke:auth       # sign-in, membership, tenant GIS, demo isolation
+npm run smoke:imports    # upload → mapping → validation → geocode (fake) → commit → map
 ```
+
+`smoke:imports` deliberately imports customers into the seeded workspace it is given, so run it against a local/CI database, not a shared one; it asserts only on the datasets and rows it created itself, and its dataset name carries a per-run suffix.
 
 `npm test` covers domain, DTO, parser, validation and server-boundary units. `npm run smoke:fixtures` builds nothing itself; run it after `npm run build`, and it will start the production server with `DATA_SOURCE=fixtures` on a spare port (override with `SMOKE_PORT`), drive the shipped browser client against the shipped route handlers, and stop the server again. It needs no database or credentials, and it exists because database mode and fixtures mode can each pass their own tests while disagreeing with each other.
 
 These application checks complement—not replace—the clean database verification gate.
+
+## Import smoke and the fake geocoder
+
+The import smoke starts the production build with `DATA_SOURCE=database` and
+`GEOCODING_PROVIDER=fake`, signs in as the seeded owner, and then drives the
+shipped wizard client end to end: create an import, upload a 5-row CSV into the
+private bucket, apply a mapping, check the per-row validation counts, run a
+geocoding batch, download the error export, commit into a new dataset, replay the
+commit (which must insert nothing) and try to re-point it (which must be
+refused), then fetch the workspace viewport through the shipped GIS client and
+assert that no phone number, address or revenue can appear in the map payload. It
+also checks the adversarial paths: a foreign workspace is refused exactly like a
+missing one, a viewer can read but not write, and a crafted upload body cannot
+redirect the file to another workspace.
+
+CI never needs a Mapbox token: the fake provider is deterministic and offline.
+The live Mapbox provider is only ever probed manually — see
+[geocoding.md](geocoding.md).
 
 ## Signing in against a local stack
 

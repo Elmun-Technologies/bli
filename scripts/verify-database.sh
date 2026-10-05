@@ -106,13 +106,14 @@ if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
     "$actual_cli_version" "$psql_client_version"
 fi
 
-# The full local stack (PostgreSQL + Auth + REST behind Kong) is required,
-# not just the database container: the authenticated end-to-end smoke signs
-# in through GoTrue and queries through PostgREST with real JWT claims.
-# Studio, mail, realtime, storage and analytics are excluded: this gate needs
-# postgres, kong, gotrue and postgrest only.
-run_stage "Start the local Supabase stack (PostgreSQL, Auth, REST) through the Supabase CLI" \
-  supabase start -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,mailpit
+# The full local stack (PostgreSQL + Auth + REST + Storage behind Kong) is
+# required, not just the database container: the authenticated end-to-end smoke
+# signs in through GoTrue and queries through PostgREST with real JWT claims,
+# and Phase 5 imports upload to the private storage bucket through the Storage
+# API, whose own schema and policies this gate verifies.
+# Studio, mail, realtime, imgproxy and analytics are excluded.
+run_stage "Start the local Supabase stack (PostgreSQL, Auth, REST, Storage) through the Supabase CLI" \
+  supabase start -x realtime,imgproxy,studio,edge-runtime,logflare,vector,supavisor,mailpit
 run_stage "Reset the local database, replay migrations, and load deterministic synthetic seed data" \
   supabase db reset --local
 
@@ -139,12 +140,35 @@ if [[ -z "$database_url" ]]; then
   exit 2
 fi
 
+# `supabase db reset` recreates the database; the Storage API normally recreates
+# its own schema when the stack restarts, but that restart is version-dependent,
+# so prove it rather than assume it. Phase 5 stores import files through the
+# Storage API and its suites assert the real storage schema, so a missing schema
+# must never be silently tolerated (or silently skipped).
+CURRENT_STAGE="ensure the Storage API schema exists after the database reset"
+storage_ready="$(psql "$database_url" -X -tAc "select pg_catalog.to_regclass('storage.objects') is not null")"
+if [[ "$storage_ready" != "t" ]]; then
+  printf '::warning title=Storage schema missing::storage.objects was absent after the reset; restarting the local stack so the Storage API recreates it\n'
+  run_stage "Restart the local Supabase stack so the Storage API recreates its schema" \
+    bash -c 'supabase stop --no-backup >/dev/null 2>&1 || true; supabase start -x realtime,imgproxy,studio,edge-runtime,logflare,vector,supavisor,mailpit'
+  storage_ready="$(psql "$database_url" -X -tAc "select pg_catalog.to_regclass('storage.objects') is not null")"
+  if [[ "$storage_ready" != "t" ]]; then
+    printf '::error::storage.objects is still missing after restarting the stack; Phase 5 import assertions cannot run\n' >&2
+    exit 2
+  fi
+fi
+printf 'Storage schema present: the private import bucket policies can be asserted.\n'
+
 run_stage "Verify Phase 2 PostGIS, ownership, RLS, deletion and distance assertions" \
   psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase2_integrity.sql
 run_stage "Verify Phase 3 viewport, radius, workspace isolation, DTO shape and spatial index assertions" \
   psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase3_spatial_queries.sql
 run_stage "Verify Phase 4 auth, workspace membership, RLS, grant and last-owner assertions" \
   psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase4_membership_rls.sql
+run_stage "Verify Phase 5 import workflow, storage and RLS assertions" \
+  psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase5_import_rls.sql
+run_stage "Verify Phase 5 geocoding batch, resume, idempotency and manual override assertions" \
+  psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase5_geocoding.sql
 
 CURRENT_STAGE="generate TypeScript types from the verified local schema"
 mkdir -p src/lib/database

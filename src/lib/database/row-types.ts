@@ -26,6 +26,10 @@ export type CustomerRow = DatabaseRow<'customers'>;
 export type CompetitorRow = DatabaseRow<'competitors'>;
 export type BranchRow = DatabaseRow<'branches'>;
 export type AnalysisLocationRow = DatabaseRow<'analysis_locations'>;
+/** Phase 5 import audit header. One row per upload. */
+export type ImportJobRow = DatabaseRow<'import_jobs'>;
+/** Phase 5 staged import row: uploaded business data plus its validation state. */
+export type StagedImportRow = DatabaseRow<'import_rows'>;
 
 /**
  * PostGIS geography is emitted as `unknown` by the Supabase type generator.

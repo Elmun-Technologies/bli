@@ -110,12 +110,12 @@ CREATE TABLE public.workspace_members (
 
 ## Permission matrix (as implemented)
 
-| Role | Read | Analytical write | Data administration | Membership administration | Owner assignment |
-| --- | --- | --- | --- | --- | --- |
-| **viewer** | workspace, organization (via membership), projects, datasets, project_datasets, locations, customers, competitors, branches, analysis_locations, membership roster of their own workspace(s); authenticated viewport + radius RPCs | none | none | none (cannot even change their own role) | no |
-| **analyst** | viewer reads | locations, customers, competitors, analysis_locations (insert/update/delete inside their workspace) | none — projects, datasets, branches are read-only | none | no |
-| **admin** | all member reads | all analytical writes | projects, datasets, project_datasets, branches, business data | add/change/remove `viewer`, `analyst`, `admin` | no |
-| **owner** | all member reads | all analytical writes | full data administration plus workspace settings (`name`, `metadata`) | full membership administration, including owner grant/change/remove subject to last-owner protection | yes |
+| Role | Read | Analytical write | Data administration | Imports (Phase 5) | Membership administration | Owner assignment |
+| --- | --- | --- | --- | --- | --- | --- |
+| **viewer** | workspace, organization (via membership), projects, datasets, project_datasets, locations, customers, competitors, branches, analysis_locations, membership roster of their own workspace(s); authenticated viewport + radius RPCs; import job metadata and staged-row preview | none | none | **read-only**: no upload, no mapping, no geocoding claim, no commit, no stored source file | none (cannot even change their own role) | no |
+| **analyst** | viewer reads | locations, customers, competitors, analysis_locations (insert/update/delete inside their workspace) | none — projects, datasets, branches are read-only | create jobs, upload, map, validate, geocode, place points manually, commit into an **existing** dataset; cannot create a dataset | none | no |
+| **admin** | all member reads | all analytical writes | projects, datasets, project_datasets, branches, business data | full import administration, including creating a destination dataset at commit time | add/change/remove `viewer`, `analyst`, `admin` | no |
+| **owner** | all member reads | all analytical writes | full data administration plus workspace settings (`name`, `metadata`) | full import administration, including creating a destination dataset at commit time | full membership administration, including owner grant/change/remove subject to last-owner protection | yes |
 | **service_role** | platform-default elevated access | operator paths only | `bootstrap_workspace_owner`, `grant_workspace_owner` | operator bootstrap only | yes (operator) |
 
 Branch data is intentionally owner/admin-only: nothing in Phase 1–3 required an
@@ -169,6 +169,20 @@ owner; owner rows are invisible to the admin UPDATE/DELETE policies entirely.
 Composite foreign keys (`(dataset_id, workspace_id)`, `(project_id, workspace_id)`)
 continue to reject cross-workspace references at the database layer, and the
 immutability triggers close the "move an existing row" case.
+
+## Import tables and storage policies (Phase 5)
+
+| Object | Policy summary |
+| --- | --- |
+| `public.import_jobs` | `SELECT` for members (`has_workspace_role` on any role); `INSERT` only when the caller's own `created_by = auth.uid()` and their role is owner/admin/analyst; `UPDATE` scoped to owner/admin/analyst of that workspace; **no `DELETE` grant at all**. Completion fields (`status = 'completed'`, `committed_at`) are additionally protected by a trigger that only `public.commit_import_job` can satisfy. |
+| `public.import_rows` | `SELECT` for members; `INSERT`/`UPDATE` for owner/admin/analyst; **no `DELETE` grant**, so staging is append-or-replace and an upload can never erase its own evidence. The composite FK plus an immutability trigger refuse re-parenting a row. |
+| `storage.objects` (bucket `workspace-imports`) | Four policies (`SELECT`/`INSERT`/`UPDATE`/`DELETE`) for owner/admin/analyst, each deriving the workspace from the first object-path segment through `import_object_workspace_id(name)` and then calling `has_workspace_role(...)`. A malformed path resolves to `NULL` and grants nothing. A viewer gets no file access; `anon` gets nothing. |
+
+The `import_jobs`/`import_rows` policies exist so the wizard can stage and read
+its own work; every privileged transition (claiming geocoding work, applying
+results, manual placement, committing, refreshing counters) is a
+`SECURITY INVOKER` function that repeats the owner/admin/analyst assertion
+itself, because a policy alone cannot express "only through this workflow".
 
 ## PostgreSQL grants
 
@@ -301,6 +315,15 @@ the cookie-aware anon client (`src/lib/supabase/server.ts`) so the caller's own
 JWT, RLS and the RPC membership assertion apply. The Supabase auth admin API is
 not used at all; the only auth-admin-equivalent action is the local seed.
 
+**Phase 5 adds no new elevated-credential use.** Every import route — including
+the private-bucket upload, the download during mapping, the geocoding batches and
+the commit — runs through the same cookie-aware client under the caller's own
+session, and the commit function is `SECURITY INVOKER`. In particular, no import
+path uses `service_role` to bypass RLS, and the map DTO boundary is unchanged, so
+an imported customer reaches the browser with the same allow-listed fields as
+before. The import smoke asserts the map payload carries no phone, address or
+revenue after a real import.
+
 ## Workspace resolver and selector
 
 * `listAuthorizedWorkspaces(userId)` reads `workspace_members` through the
@@ -332,6 +355,28 @@ under test are exactly the policies PostgREST applies:
 * parity between the authenticated viewport/radius RPCs and the Phase 3 demo
   RPCs, plus PII checks (no customer display names, no workspace B isolation
   rows), and that the demo RPCs stay `service_role`-only.
+
+`supabase/tests/phase5_import_rls.sql` and `supabase/tests/phase5_geocoding.sql`
+extend the same technique to Phase 5 and assert, among other things: a reviewer
+cannot upload, map, claim or commit; a foreign workspace cannot read staged rows,
+cite a dataset, commit a job or read a stored object; a malformed storage path
+grants nothing; direct writes cannot claim completion; the completion fields are
+committed only through the workflow function; duplicate `external_id` rows are
+marked invalid rather than merged or dropped; a replayed commit inserts nothing; a
+committed import cannot be re-pointed at a new dataset; and the two staging tables
+have no `DELETE` privilege for `authenticated`.
+
+The end-to-end import smoke (`scripts/smoke-import-mode.ts`, run by
+`npm run smoke:imports` and in CI) drives the **shipped** client modules against
+the **shipped** production routes: it signs in, creates an import, uploads a real
+CSV to the private bucket, maps and validates it, runs a fake-provider geocoding
+batch, downloads the error export, commits (then replays and attempts to re-point
+the commit), and finally reads the workspace viewport through the shipped GIS
+client to prove no phone number, address or revenue can reach the map payload.
+It also checks that a foreign workspace and a non-existent one produce the
+identical refusal, that a viewer can read but not write, and that a crafted
+upload body cannot redirect the file elsewhere. CI sets `GEOCODING_PROVIDER=fake`,
+so the gate needs no Mapbox token and never calls the paid service.
 
 ### Verified results
 

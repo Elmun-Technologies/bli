@@ -59,7 +59,11 @@ export default async function WorkspacePage({ params }: WorkspacePageProps) {
         </div>
       </header>
 
-      <AppShell dataSource={resolveDataSourceMode()} workspaceId={workspace.id} />
+      <AppShell
+        dataSource={resolveDataSourceMode()}
+        workspaceId={workspace.id}
+        workspaceRole={workspace.role}
+      />
     </div>
   );
 }
