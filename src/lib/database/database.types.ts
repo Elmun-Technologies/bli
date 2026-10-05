@@ -437,6 +437,16 @@ isOneToOne: false
 "is_workspace_member":
 { Args: { "p_workspace_id": string }; Returns: boolean
                            },
+"list_analysis_locations":
+{ Args: { "p_project_id": string,"p_workspace_id": string }; Returns: {
+              "created_at": string,"id": string,"latitude": number,"longitude": number,"name": string
+            }[]
+                           },
+"list_location_analyses":
+{ Args: { "p_limit"?: number,"p_mode"?: string,"p_project_id": string,"p_workspace_id": string }; Returns: {
+              "analysis": Json
+            }[]
+                           },
 "location_analysis_payload":
 { Args: { "p_analysis_id": string }; Returns: Json
                            },
@@ -447,6 +457,11 @@ isOneToOne: false
                            },
 "run_location_analysis":
 { Args: { "p_candidate_ids": (string)[],"p_mode"?: string,"p_project_id": string,"p_radius_meters": number,"p_scoring_model_id": string,"p_workspace_id": string }; Returns: Json
+                           },
+"save_analysis_location":
+{ Args: { "p_latitude": number,"p_longitude": number,"p_name": string,"p_project_id": string,"p_workspace_id": string }; Returns: {
+              "created_at": string,"id": string,"latitude": number,"longitude": number,"name": string
+            }[]
                            },
 "scoring_interpolate":
 { Args: { "p_points": Json,"p_value": number }; Returns: number

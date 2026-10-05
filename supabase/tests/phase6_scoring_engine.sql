@@ -401,6 +401,93 @@ END;
 $phase6_models_created$;
 
 -- ---------------------------------------------------------------------------
+-- Saved candidate locations and analysis history
+-- ---------------------------------------------------------------------------
+SELECT pg_temp.phase6_expect_numeric(
+  'the four saved candidates of the project are listed with coordinates',
+  $sql$SELECT pg_catalog.count(*) FROM public.list_analysis_locations(
+          '00000000-0000-4000-8000-000000000011',
+          '00000000-0000-4000-8000-000000000021'
+        ) WHERE longitude IS NOT NULL AND latitude IS NOT NULL$sql$,
+  4
+);
+
+SELECT pg_temp.phase6_expect_numeric(
+  'a saved candidate is listed with its readable longitude',
+  $sql$SELECT longitude FROM public.list_analysis_locations(
+          '00000000-0000-4000-8000-000000000011',
+          '00000000-0000-4000-8000-000000000021'
+        ) WHERE name = 'Candidate A Center'$sql$,
+  69.2797
+);
+
+SELECT pg_temp.phase6_expect_numeric(
+  'saving a candidate returns the stored coordinate pair',
+  $sql$SELECT latitude FROM public.save_analysis_location(
+          '00000000-0000-4000-8000-000000000011',
+          '00000000-0000-4000-8000-000000000021',
+          'Candidate E Saved',
+          69.2500,
+          41.3010
+        )$sql$,
+  41.301
+);
+
+SELECT pg_temp.phase6_expect_numeric(
+  'the saved candidate is then part of the project list',
+  $sql$SELECT pg_catalog.count(*) FROM public.list_analysis_locations(
+          '00000000-0000-4000-8000-000000000011',
+          '00000000-0000-4000-8000-000000000021'
+        )$sql$,
+  5
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'a candidate name is required',
+  $sql$SELECT public.save_analysis_location(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021',
+    '   ',
+    69.25,
+    41.30
+  )$sql$,
+  '22023'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'impossible coordinates are refused',
+  $sql$SELECT public.save_analysis_location(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021',
+    'Nowhere',
+    200,
+    41.30
+  )$sql$,
+  '22023'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'a candidate cannot be saved into a foreign project',
+  $sql$SELECT public.save_analysis_location(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000020',
+    'Foreign project candidate',
+    69.28,
+    41.31
+  )$sql$,
+  'P0002'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'candidates of a foreign workspace are refused',
+  $sql$SELECT pg_catalog.count(*) FROM public.list_analysis_locations(
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020'
+  )$sql$,
+  '42501'
+);
+
+-- ---------------------------------------------------------------------------
 -- Threshold normalization, weights, contributions and ordering
 -- ---------------------------------------------------------------------------
 INSERT INTO phase6_runs (label, payload)
@@ -781,6 +868,81 @@ SELECT pg_temp.phase6_expect_numeric(
   $sql$(SELECT (phase6_runs.payload -> 'results' -> 0 ->> 'final_score')::numeric
           FROM phase6_runs WHERE label = 'no-branch-500')$sql$,
   62.5
+);
+
+-- ---------------------------------------------------------------------------
+-- Analysis history
+-- ---------------------------------------------------------------------------
+SELECT pg_temp.phase6_expect_numeric(
+  'the history honours its limit and returns stored payloads',
+  $sql$SELECT pg_catalog.count(*) FROM public.list_location_analyses(
+          '00000000-0000-4000-8000-000000000011',
+          '00000000-0000-4000-8000-000000000021',
+          NULL,
+          4
+        )$sql$,
+  4
+);
+
+SELECT pg_temp.phase6_expect_true(
+  'a history entry carries the stored payload of one of the runs, results included',
+  $sql$(SELECT pg_catalog.bool_and(
+                 (entry.analysis -> 'analysis' ->> 'id') IN (
+                   SELECT payload -> 'analysis' ->> 'id' FROM phase6_runs
+                 )
+                 AND pg_catalog.jsonb_array_length(entry.analysis -> 'results') >= 1
+                 AND (entry.analysis -> 'results' -> 0 ->> 'final_score') IS NOT NULL
+               )
+          FROM public.list_location_analyses(
+                 '00000000-0000-4000-8000-000000000011',
+                 '00000000-0000-4000-8000-000000000021',
+                 NULL,
+                 4
+               ) AS entry)$sql$
+);
+
+SELECT pg_temp.phase6_expect_numeric(
+  'the history limit is honoured',
+  $sql$SELECT pg_catalog.count(*) FROM public.list_location_analyses(
+          '00000000-0000-4000-8000-000000000011',
+          '00000000-0000-4000-8000-000000000021',
+          NULL,
+          1
+        )$sql$,
+  1
+);
+
+SELECT pg_temp.phase6_expect_numeric(
+  'the mode filter keeps only comparisons',
+  $sql$SELECT pg_catalog.count(*) FROM public.list_location_analyses(
+          '00000000-0000-4000-8000-000000000011',
+          '00000000-0000-4000-8000-000000000021',
+          'comparison',
+          20
+        )$sql$,
+  2
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'an unknown mode filter is refused',
+  $sql$SELECT pg_catalog.count(*) FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000011',
+    '00000000-0000-4000-8000-000000000021',
+    'forecast',
+    5
+  )$sql$,
+  '22023'
+);
+
+SELECT pg_temp.phase6_expect_error(
+  'the analysis history of a foreign workspace is refused',
+  $sql$SELECT pg_catalog.count(*) FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020',
+    NULL,
+    5
+  )$sql$,
+  '42501'
 );
 
 -- ---------------------------------------------------------------------------

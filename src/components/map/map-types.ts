@@ -29,6 +29,18 @@ export interface MapViewportSnapshot {
   meta: ViewportFeatureMetadata;
 }
 
+/**
+ * A candidate location of a stored analysis, drawn with its A..E label. These are
+ * saved coordinates and a score the database computed: the map adds no meaning.
+ */
+export interface MapScoringCandidate {
+  candidateId: string;
+  label: string;
+  name: string;
+  coordinates: [number, number];
+  score: number;
+}
+
 export interface MapViewProps {
   visibleLayers: MapLayerId[];
   selectedLocation: SelectedLocation;
@@ -45,4 +57,7 @@ export interface MapViewProps {
   onCreateCandidate: (coordinates: Coordinates) => void;
   onFeaturesLoaded: (snapshot: MapViewportSnapshot) => void;
   onDataStateChange: (state: MapDataState) => void;
+  /** Candidates of the analysis currently on screen, labelled A..E. */
+  scoringCandidates?: MapScoringCandidate[];
+  onSelectScoringCandidate?: (candidateId: string) => void;
 }

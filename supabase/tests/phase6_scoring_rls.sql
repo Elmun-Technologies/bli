@@ -134,6 +134,27 @@ BEGIN
     RAISE EXCEPTION 'The composite candidate identity constraint is missing';
   END IF;
 
+  IF NOT (
+    pg_catalog.has_function_privilege(
+      'authenticated', 'public.list_analysis_locations(uuid, uuid)', 'EXECUTE')
+    AND pg_catalog.has_function_privilege(
+      'authenticated',
+      'public.save_analysis_location(uuid, uuid, text, double precision, double precision)',
+      'EXECUTE')
+    AND pg_catalog.has_function_privilege(
+      'authenticated', 'public.list_location_analyses(uuid, uuid, text, integer)', 'EXECUTE')
+    AND NOT pg_catalog.has_function_privilege(
+      'anon', 'public.list_analysis_locations(uuid, uuid)', 'EXECUTE')
+    AND NOT pg_catalog.has_function_privilege(
+      'anon',
+      'public.save_analysis_location(uuid, uuid, text, double precision, double precision)',
+      'EXECUTE')
+    AND NOT pg_catalog.has_function_privilege(
+      'anon', 'public.list_location_analyses(uuid, uuid, text, integer)', 'EXECUTE')
+  ) THEN
+    RAISE EXCEPTION 'The candidate and history function grants are not the documented ones';
+  END IF;
+
   RAISE NOTICE 'Preflight: RLS, policies, grants, definer discipline and the candidate identity constraint are in place';
 END;
 $phase6_rls_preflight$;
@@ -326,6 +347,18 @@ SELECT pg_temp.p6rls_expect_count(
   1
 );
 
+SELECT pg_temp.p6rls_expect_true(
+  'an analyst can save a candidate through the RPC',
+  $sql$SELECT saved.id IS NOT NULL
+          FROM public.save_analysis_location(
+                 '00000000-0000-4000-8000-000000000010',
+                 '00000000-0000-4000-8000-000000000020',
+                 'Analyst RPC candidate',
+                 69.2820,
+                 41.3115
+               ) AS saved$sql$
+);
+
 SELECT pg_temp.p6rls_expect_error(
   'nobody may forge an analysis row, not even the workspace owner',
   $sql$INSERT INTO public.location_analyses (
@@ -376,6 +409,38 @@ SELECT pg_temp.p6rls_expect_error(
        VALUES ('00000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000020',
                'Viewer candidate',
                extensions.st_setsrid(extensions.st_makepoint(69.28, 41.31), 4326)::extensions.geography)$sql$,
+  '42501'
+);
+
+SELECT pg_temp.p6rls_expect_true(
+  'a viewer can read the saved candidates with their coordinates',
+  $sql$SELECT pg_catalog.bool_and(candidate.longitude IS NOT NULL)
+          FROM public.list_analysis_locations(
+                 '00000000-0000-4000-8000-000000000010',
+                 '00000000-0000-4000-8000-000000000020'
+               ) AS candidate$sql$
+);
+
+SELECT pg_temp.p6rls_expect_true(
+  'a viewer can read the stored analysis history',
+  $sql$SELECT pg_catalog.count(*) > 0
+          FROM public.list_location_analyses(
+                 '00000000-0000-4000-8000-000000000010',
+                 '00000000-0000-4000-8000-000000000020',
+                 NULL,
+                 5
+               ) AS stored$sql$
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'a viewer cannot save a candidate through the RPC either',
+  $sql$SELECT public.save_analysis_location(
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020',
+    'Viewer RPC candidate',
+    69.28,
+    41.31
+  )$sql$,
   '42501'
 );
 
@@ -552,6 +617,38 @@ SELECT pg_temp.p6rls_expect_count(
   $sql$SELECT pg_catalog.count(*) FROM public.location_analysis_results
          WHERE workspace_id = '00000000-0000-4000-8000-000000000010'$sql$,
   0
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'a foreign owner cannot list another workspace candidates',
+  $sql$SELECT candidate.id FROM public.list_analysis_locations(
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020'
+  ) AS candidate$sql$,
+  '42501'
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'a foreign owner cannot save a candidate into another workspace',
+  $sql$SELECT public.save_analysis_location(
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020',
+    'Foreign candidate',
+    69.28,
+    41.31
+  )$sql$,
+  '42501'
+);
+
+SELECT pg_temp.p6rls_expect_error(
+  'a foreign owner cannot read another workspace analysis history',
+  $sql$SELECT stored.analysis FROM public.list_location_analyses(
+    '00000000-0000-4000-8000-000000000010',
+    '00000000-0000-4000-8000-000000000020',
+    NULL,
+    5
+  ) AS stored$sql$,
+  '42501'
 );
 
 SELECT pg_temp.p6rls_expect_error(

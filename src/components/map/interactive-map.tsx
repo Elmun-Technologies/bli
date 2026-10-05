@@ -27,12 +27,13 @@ import {
   SpatialApiError,
 } from '@/lib/spatial/client';
 import { MAX_VIEWPORT_LATITUDE_SPAN, MAX_VIEWPORT_LONGITUDE_SPAN } from '@/lib/spatial/validation';
-import type { MapDataStatus, MapViewProps } from '@/components/map/map-types';
+import type { MapDataStatus, MapScoringCandidate, MapViewProps } from '@/components/map/map-types';
 
 const DEFAULT_MAP_STYLE_URL = 'https://tiles.openfreemap.org/styles/positron';
 const POINT_SOURCE_ID = 'pilot-points';
 const SELECTED_SOURCE_ID = 'selected-location';
 const RADIUS_SOURCE_ID = 'analysis-radius';
+const SCORING_SOURCE_ID = 'scoring-candidates';
 
 function toViewportBounds(map: MapLibreMap): ViewportBounds | null {
   const bounds = map.getBounds();
@@ -102,6 +103,29 @@ function updateCircleSource(
   selectedSource?.setData(toMapPointFeatureCollection([selectedLocation]));
 }
 
+function toScoringFeatureCollection(
+  candidates: readonly MapScoringCandidate[],
+): FeatureCollection<Point, { candidate_id: string; label: string; name: string; score: number }> {
+  return {
+    type: 'FeatureCollection',
+    features: candidates.map((candidate) => ({
+      type: 'Feature',
+      id: candidate.candidateId,
+      geometry: { type: 'Point', coordinates: candidate.coordinates },
+      properties: {
+        candidate_id: candidate.candidateId,
+        label: candidate.label,
+        name: candidate.name,
+        score: candidate.score,
+      },
+    })),
+  };
+}
+
+function toEmptyScoringCollection(): FeatureCollection<Point, { candidate_id: string; label: string }> {
+  return { type: 'FeatureCollection', features: [] };
+}
+
 export function InteractiveMap({
   visibleLayers,
   selectedLocation,
@@ -109,7 +133,9 @@ export function InteractiveMap({
   focusRequest,
   dataSource,
   workspaceId,
+  scoringCandidates,
   onSelectLocation,
+  onSelectScoringCandidate,
   onCreateCandidate,
   onFeaturesLoaded,
   onDataStateChange,
@@ -126,6 +152,7 @@ export function InteractiveMap({
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const onSelectLocationRef = useRef(onSelectLocation);
+  const onSelectScoringCandidateRef = useRef(onSelectScoringCandidate);
   const onCreateCandidateRef = useRef(onCreateCandidate);
   const onFeaturesLoadedRef = useRef(onFeaturesLoaded);
   const onDataStateChangeRef = useRef(onDataStateChange);
@@ -133,10 +160,17 @@ export function InteractiveMap({
 
   useEffect(() => {
     onSelectLocationRef.current = onSelectLocation;
+    onSelectScoringCandidateRef.current = onSelectScoringCandidate;
     onCreateCandidateRef.current = onCreateCandidate;
     onFeaturesLoadedRef.current = onFeaturesLoaded;
     onDataStateChangeRef.current = onDataStateChange;
-  }, [onCreateCandidate, onDataStateChange, onFeaturesLoaded, onSelectLocation]);
+  }, [
+    onCreateCandidate,
+    onDataStateChange,
+    onFeaturesLoaded,
+    onSelectLocation,
+    onSelectScoringCandidate,
+  ]);
 
   useEffect(() => {
     hasLoadedOnceRef.current = hasLoadedOnce;
@@ -208,6 +242,10 @@ export function InteractiveMap({
       map.addSource(RADIUS_SOURCE_ID, {
         type: 'geojson',
         data: createCirclePolygon(DEFAULT_SELECTED_LOCATION.coordinates, 1_000),
+      });
+      map.addSource(SCORING_SOURCE_ID, {
+        type: 'geojson',
+        data: toEmptyScoringCollection(),
       });
 
       map.addLayer({
@@ -285,6 +323,42 @@ export function InteractiveMap({
         },
       });
       map.addLayer({
+        id: 'scoring-candidate-halo',
+        type: 'circle',
+        source: SCORING_SOURCE_ID,
+        paint: {
+          'circle-radius': 16,
+          'circle-color': 'rgba(45, 106, 175, 0.14)',
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': 'rgba(35, 84, 138, 0.72)',
+        },
+      });
+      map.addLayer({
+        id: 'scoring-candidate-core',
+        type: 'circle',
+        source: SCORING_SOURCE_ID,
+        paint: {
+          'circle-radius': 8,
+          'circle-color': '#2d6aaf',
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+      map.addLayer({
+        id: 'scoring-candidate-label',
+        type: 'symbol',
+        source: SCORING_SOURCE_ID,
+        layout: {
+          'text-field': ['get', 'label'],
+          'text-size': 11,
+          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Regular'],
+          'text-allow-overlap': true,
+        },
+        paint: {
+          'text-color': '#ffffff',
+        },
+      });
+      map.addLayer({
         id: 'selection-halo',
         type: 'circle',
         source: SELECTED_SOURCE_ID,
@@ -332,16 +406,35 @@ export function InteractiveMap({
         });
       });
 
+      for (const layerId of ['scoring-candidate-halo', 'scoring-candidate-core']) {
+        map.on('click', layerId, (event) => {
+          const candidateId = event.features?.[0]?.properties?.candidate_id;
+          if (typeof candidateId === 'string') onSelectScoringCandidateRef.current?.(candidateId);
+        });
+      }
+
       map.on('click', (event) => {
         const clickedFeatures = map.queryRenderedFeatures(event.point, {
-          layers: ['point-markers', 'point-clusters', 'candidate-core'],
+          layers: [
+            'point-markers',
+            'point-clusters',
+            'candidate-core',
+            'scoring-candidate-halo',
+            'scoring-candidate-core',
+          ],
         });
         if (clickedFeatures.length > 0) return;
 
         onCreateCandidateRef.current([event.lngLat.lng, event.lngLat.lat]);
       });
 
-      for (const layerId of ['point-markers', 'point-clusters', 'candidate-core']) {
+      for (const layerId of [
+        'point-markers',
+        'point-clusters',
+        'candidate-core',
+        'scoring-candidate-halo',
+        'scoring-candidate-core',
+      ]) {
         map.on('mouseenter', layerId, () => {
           map.getCanvas().style.cursor = 'pointer';
         });
@@ -467,6 +560,14 @@ export function InteractiveMap({
 
     updateCircleSource(map, selectedLocation, radiusMeters);
   }, [isMapLoaded, radiusMeters, selectedLocation]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapLoaded) return;
+
+    const source = map.getSource(SCORING_SOURCE_ID) as GeoJSONSource | undefined;
+    source?.setData(scoringCandidates ? toScoringFeatureCollection(scoringCandidates) : toEmptyScoringCollection());
+  }, [isMapLoaded, scoringCandidates]);
 
   useEffect(() => {
     const map = mapRef.current;

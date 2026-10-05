@@ -1,0 +1,264 @@
+{
+  "model": {
+    "model": {
+      "id": "00000000-0000-4000-8000-000000000040",
+      "name": "Retail Expansion Model",
+      "status": "active",
+      "version": 1,
+      "description": "Generic retail expansion score: customer density and revenue potential, competition, commercial activity and branch coverage. Threshold stops keep the score explainable for a single candidate."
+    },
+    "factors": [
+      {
+        "key": "customer_density",
+        "label": "Customer Density",
+        "metric": "customers_count",
+        "weight": 25,
+        "enabled": true,
+        "direction": "positive",
+        "sort_order": 1,
+        "configuration": {
+          "points": [
+            {
+              "score": 0,
+              "value": 0
+            },
+            {
+              "score": 50,
+              "value": 500
+            },
+            {
+              "score": 100,
+              "value": 1000
+            }
+          ],
+          "missing_score": 0,
+          "degenerate_score": 50
+        },
+        "normalization": "threshold"
+      },
+      {
+        "key": "revenue_potential",
+        "label": "Revenue Potential",
+        "metric": "customers_revenue_total",
+        "weight": 25,
+        "enabled": true,
+        "direction": "positive",
+        "sort_order": 2,
+        "configuration": {
+          "points": [
+            {
+              "score": 0,
+              "value": 0
+            },
+            {
+              "score": 50,
+              "value": 250000000
+            },
+            {
+              "score": 100,
+              "value": 500000000
+            }
+          ],
+          "missing_score": 0,
+          "degenerate_score": 50
+        },
+        "normalization": "threshold"
+      },
+      {
+        "key": "competition",
+        "label": "Competition",
+        "metric": "competitors_count",
+        "weight": 20,
+        "enabled": true,
+        "direction": "negative",
+        "sort_order": 3,
+        "configuration": {
+          "points": [
+            {
+              "score": 100,
+              "value": 0
+            },
+            {
+              "score": 0,
+              "value": 20
+            }
+          ],
+          "missing_score": 100,
+          "degenerate_score": 50
+        },
+        "normalization": "threshold"
+      },
+      {
+        "key": "commercial_activity",
+        "label": "Commercial Activity",
+        "metric": "locations_count",
+        "weight": 15,
+        "enabled": true,
+        "direction": "positive",
+        "sort_order": 4,
+        "configuration": {
+          "points": [
+            {
+              "score": 0,
+              "value": 0
+            },
+            {
+              "score": 50,
+              "value": 50
+            },
+            {
+              "score": 100,
+              "value": 100
+            }
+          ],
+          "missing_score": 0,
+          "degenerate_score": 50
+        },
+        "normalization": "threshold"
+      },
+      {
+        "key": "branch_coverage",
+        "label": "Branch Coverage",
+        "metric": "branch_distance_score",
+        "weight": 15,
+        "enabled": true,
+        "direction": "positive",
+        "sort_order": 5,
+        "configuration": {
+          "points": [
+            {
+              "score": 0,
+              "value": 0
+            },
+            {
+              "score": 100,
+              "value": 100
+            }
+          ],
+          "missing_score": 0,
+          "degenerate_score": 50
+        },
+        "normalization": "threshold"
+      }
+    ]
+  },
+  "results": [
+    {
+      "rank": 1,
+      "latitude": 41.295,
+      "longitude": 69.29,
+      "final_score": 20.2,
+      "raw_metrics": {
+        "area_sq_km": 0.7854,
+        "radius_meters": 500,
+        "branches_count": 0,
+        "customers_count": 2,
+        "locations_count": 1,
+        "competitors_count": 0,
+        "nearest_branch_id": "30000000-0000-4000-8000-000000000000",
+        "revenue_per_sq_km": "631.44",
+        "customers_per_sq_km": 2.5465,
+        "nearest_branch_name": "Synthetic branch 000",
+        "branch_distance_score": 0,
+        "category_distribution": [
+          {
+            "kind": "places",
+            "count": 1,
+            "category": "hotel"
+          }
+        ],
+        "competitors_per_sq_km": 0,
+        "commercial_poi_density": 1.2732,
+        "customers_revenue_total": "495.93",
+        "customer_to_competitor_ratio": 2,
+        "nearest_branch_distance_meters": 1985.26
+      },
+      "candidate_id": "00000000-0000-4000-8000-000000000051",
+      "candidate_name": "Chilonzor site (saved candidate)",
+      "normalized_metrics": {
+        "competition": 100,
+        "branch_coverage": 0,
+        "customer_density": 0.2,
+        "revenue_potential": 0,
+        "commercial_activity": 1
+      },
+      "factor_contributions": [
+        {
+          "key": "customer_density",
+          "label": "Customer Density",
+          "metric": "customers_count",
+          "weight": 25,
+          "raw_text": "2",
+          "direction": "positive",
+          "raw_value": 2,
+          "normalized": 0.2,
+          "contribution": 0.05,
+          "normalization": "threshold"
+        },
+        {
+          "key": "revenue_potential",
+          "label": "Revenue Potential",
+          "metric": "customers_revenue_total",
+          "weight": 25,
+          "raw_text": "495.93",
+          "direction": "positive",
+          "raw_value": 495.93,
+          "normalized": 0,
+          "contribution": 0,
+          "normalization": "threshold"
+        },
+        {
+          "key": "competition",
+          "label": "Competition",
+          "metric": "competitors_count",
+          "weight": 20,
+          "raw_text": "0",
+          "direction": "negative",
+          "raw_value": 0,
+          "normalized": 100,
+          "contribution": 20,
+          "normalization": "threshold"
+        },
+        {
+          "key": "commercial_activity",
+          "label": "Commercial Activity",
+          "metric": "locations_count",
+          "weight": 15,
+          "raw_text": "1",
+          "direction": "positive",
+          "raw_value": 1,
+          "normalized": 1,
+          "contribution": 0.15,
+          "normalization": "threshold"
+        },
+        {
+          "key": "branch_coverage",
+          "label": "Branch Coverage",
+          "metric": "branch_distance_score",
+          "weight": 15,
+          "raw_text": "0.00",
+          "direction": "positive",
+          "raw_value": 0,
+          "normalized": 0,
+          "contribution": 0,
+          "normalization": "threshold"
+        }
+      ]
+    }
+  ],
+  "analysis": {
+    "id": "b2608859-f847-4c6f-bc91-6d30a37eb35f",
+    "mode": "analysis",
+    "created_at": "2026-10-05T06:02:31.165+00:00",
+    "model_name": "Retail Expansion Model",
+    "project_id": "00000000-0000-4000-8000-000000000020",
+    "workspace_id": "00000000-0000-4000-8000-000000000010",
+    "model_version": 1,
+    "radius_meters": 500,
+    "candidate_count": 1,
+    "may_be_outdated": false,
+    "data_snapshot_at": "2026-10-05T06:02:31.165+00:00",
+    "scoring_model_id": "00000000-0000-4000-8000-000000000040",
+    "workspace_data_updated_at": "2026-10-05T06:01:27.047+00:00"
+  }
+}

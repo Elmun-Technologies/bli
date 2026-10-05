@@ -235,11 +235,69 @@ Two details worth keeping in mind when changing this schema:
   `using` predicate: that is what stops an admin from rewriting a `viewer` row
   into `owner` or promoting themselves.
 
+**Phase 6** keeps the same discipline on four more tables: models and factors allow the deliberate
+writes their RPCs perform, analyses and results are read-only for clients because the scoring
+function is their single writer, and every policy is a membership test. `anon` keeps zero
+privileges, and `run_location_analysis` is the only `SECURITY DEFINER` function in the phase.
+
 Service-role credentials remain server-only. RLS does not make a service-role
 key safe for a browser, and Phase 4 does not add any service-role table access
 beyond the Phase 3 demo grants plus the two bootstrap functions. **Phase 5 adds
 no service-role usage at all**: every import step runs under the caller's own
 session, and the storage bucket is reached with the same cookie-aware client.
+
+## Phase 6 scoring schema
+
+Five migrations total lead to the scoring engine (see `docs/scoring.md` for the behaviour):
+
+- `20261005090000_phase6_scoring_engine.sql` — four tables, their constraints and triggers, six
+  helper functions, the four scoring RPCs, RLS and the grant matrix.
+- `20261005092000_phase6_scoring_workspace_queries.sql` — the workspace-scoped query RPCs added
+  after the engine: `list_analysis_locations`, `save_analysis_location` and
+  `list_location_analyses` (membership-asserting, `SECURITY INVOKER`, with the optional mode filter).
+
+Tables: `scoring_models`, `scoring_model_factors`, `location_analyses`,
+`location_analysis_results`. Money is stored and returned as exact `numeric`/text
+(`customers_revenue_total`, `revenue_per_sq_km`), never as a JavaScript float; the payload
+serializes revenue as decimal text on purpose.
+
+Functions (all `SECURITY INVOKER` with `search_path = pg_catalog` unless noted):
+
+| Function | Kind | Purpose |
+| --- | --- | --- |
+| `scoring_threshold_points_valid(jsonb, direction)` | immutable | Validates an authored threshold curve for the `CHECK` constraint |
+| `scoring_interpolate(jsonb, numeric)` | immutable | Piecewise-linear interpolation between validated stops |
+| `scoring_metric_value(jsonb, text)` | immutable | Reads one metric out of a raw-metrics object for normalization |
+| `scoring_metric_text(jsonb, text)` | immutable | The exact-text variant used for revenue |
+| `validate_scoring_factors(jsonb)` | plpgsql | The 100 percent weight rule and the factor shapes, usable outside a constraint |
+| `insert_scoring_factors(uuid, jsonb)` | plpgsql | One-statement factor replace used by both model RPCs |
+| `assert_scoring_model_weights()` | deferred constraint trigger | Re-checks the enabled weight total at commit |
+| `bump_scoring_model_version()` | statement trigger (transition tables) | Advances the model revision once per factor statement |
+| `create_scoring_model(uuid, text, text, text, jsonb)` | RPC | owner/admin only |
+| `update_scoring_model(uuid, text, text, text, jsonb)` | RPC | owner/admin only |
+| `run_location_analysis(uuid, uuid, uuid[], integer, uuid, text)` | RPC, **`SECURITY DEFINER`** with an explicit `search_path` | The only writer of analyses; owner/admin/analyst |
+| `location_analysis_payload(uuid)` | helper | Builds the stored payload for one analysis |
+| `get_location_analysis(uuid, uuid)` | RPC | Reads one stored analysis |
+| `list_analysis_locations(uuid, uuid)` | RPC | Saved candidates of a project |
+| `save_analysis_location(uuid, uuid, text, double precision, double precision)` | RPC | Saves one candidate (owner/admin/analyst) |
+| `list_location_analyses(uuid, uuid, text, integer)` | RPC | Stored analyses newest first with an optional mode filter |
+
+`run_location_analysis` is the single deliberate exception to `SECURITY INVOKER` in Phase 6: it
+must write analyses and results that no client may write directly, so it is defined safe
+(`search_path = pg_catalog`, schema-qualified references, membership and role asserted before any
+write) and it is the only Phase 6 function granted that posture. The RLS suite asserts that it is
+the only `SECURITY DEFINER` scoring function.
+
+RLS is enabled on all four tables, `anon` holds zero privileges, and the grant matrix is: models
+(`SELECT`/`INSERT`/`UPDATE`), factors (`SELECT`/`INSERT`/`UPDATE`/`DELETE`), analyses and results
+(`SELECT` only — only the scoring function writes them). Policies are per-table and membership-based;
+see [auth-security.md](auth-security.md) for the policy list and the verification that no blanket
+policy exists.
+
+Triggers: `updated_at` maintenance, `prevent_tenant_record_move` (a row may never change workspace),
+the deferred weight assertion and the revision bump. `analysis_locations_workspace_identity_unique`
+replaced the old unique key so analyses and results can carry composite workspace foreign keys that
+make a cross-workspace candidate or analysis impossible at the constraint level.
 
 ## PII and domain boundaries
 

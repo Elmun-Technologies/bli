@@ -1,5 +1,31 @@
 # Deployment and security notes
 
+## Phase 6 deployment gate
+
+Phase 6 adds configurable scoring models, saved candidate sites and stored analyses. Before
+deploying it:
+
+1. Ensure the clean-reset workflow is green **including**
+   `supabase/tests/phase6_scoring_engine.sql`, `supabase/tests/phase6_scoring_rls.sql`, the
+   generated-type drift check and all four end-to-end smokes.
+2. Apply the Phase 6 migrations in timestamp order (`20261005090000` → `20261005092000`). The
+   engine migration depends on Phase 2 (`analysis_locations`), Phase 3 (the radius RPC) and
+   Phase 4 (`workspace_role`); replaying it out of order fails loudly.
+3. **Seed one active model per workspace before users arrive.** Without an `active` model a run is
+   refused with a safe validation error. The migration seeds nothing: the synthetic demo model lives
+   in `supabase/seed.sql` and must never be deployed to a project with real users.
+4. **Review the shipped factor definitions.** Weights, thresholds and directions are business
+   choices, not engine defaults: change them through the API as an owner/admin, and remember that a
+   save advances the model revision while stored analyses keep the revision they were run with.
+5. **Decide how outdated data is handled.** The `may_be_outdated` flag is advisory; there is no
+   automatic rescoring and no dataset version control. Tell operators to re-run an analysis after a
+   material data load.
+6. `run_location_analysis` is `SECURITY DEFINER` by design so that only the engine writes analyses
+   and results. If it is ever changed, keep `search_path = pg_catalog`, schema-qualified references
+   and the membership/role assertion before any write, and re-run the scoring suites.
+7. There is no scoring job, queue or background worker: every analysis is an explicit user action and
+   every endpoint is `dynamic`/`no-store`.
+
 ## Phase 5 deployment gate
 
 Phase 5 adds CSV/XLSX imports, private source-file storage and geocoding. Before
@@ -195,6 +221,10 @@ write path as well as a read path:
    after any change to the import tables, the storage policies or the workflow
    functions; the storage suite is the proof that a path never authorizes by
    itself.
+5. **Re-run the Phase 6 suites** (`phase6_scoring_engine.sql`,
+   `phase6_scoring_rls.sql`) after any change to the scoring tables, the factor
+   rules or the scoring functions; the RLS suite is the proof that a score cannot
+   be forged and that an old analysis keeps its snapshot.
 
 ## Post-Phase-4 operational checklist
 

@@ -11,6 +11,8 @@ import {
 } from '@/components/app/analysis-state';
 import { ComingSoon } from '@/components/app/coming-soon';
 import { ImportWizard } from '@/components/app/import-wizard';
+import { LocationsPanel } from '@/components/app/locations-panel';
+import type { ScoringMapCandidate } from '@/components/app/scoring-state';
 import { LeftSidebar, type WorkspaceSection } from '@/components/app/left-sidebar';
 import { MapLayerControl } from '@/components/app/map-layer-control';
 import { TopBar } from '@/components/app/top-bar';
@@ -75,6 +77,8 @@ export function AppShell({
     dataSource,
   });
   const [analysis, setAnalysis] = useState<AnalysisState>(IDLE_ANALYSIS_STATE);
+  const [scoringCandidates, setScoringCandidates] = useState<ScoringMapCandidate[]>([]);
+  const [focusedScoringCandidateId, setFocusedScoringCandidateId] = useState<string | null>(null);
   const analysisRequestRef = useRef<AbortController | null>(null);
   const focusRequestId = useRef(0);
   const candidateNumber = useRef(1);
@@ -102,6 +106,21 @@ export function AppShell({
       address: 'Map-selected coordinate · geocoding not configured',
       coordinates: validatedCoordinates,
     });
+  }, []);
+
+  const handleShowScoringOnMap = useCallback((candidates: ScoringMapCandidate[]) => {
+    setScoringCandidates(candidates);
+  }, []);
+
+  // Clicking a labelled candidate on the map opens its stored breakdown in the
+  // locations section. The map never runs an analysis by itself.
+  const handleSelectScoringCandidate = useCallback((candidateId: string) => {
+    setFocusedScoringCandidateId(candidateId);
+    setActiveSection('Locations');
+  }, []);
+
+  const handleFocusedCandidateHandled = useCallback(() => {
+    setFocusedScoringCandidateId(null);
   }, []);
 
   const handleToggleLayer = useCallback((layer: MapLayerId) => {
@@ -224,6 +243,17 @@ export function AppShell({
             onViewOnMap={() => setActiveSection('Map')}
             workspaceId={workspaceId}
           />
+        ) : activeSection === 'Locations' && workspaceId ? (
+          <LocationsPanel
+            dataSource={dataSource}
+            focusedCandidateId={focusedScoringCandidateId}
+            onFocusedCandidateHandled={handleFocusedCandidateHandled}
+            onOpenMap={() => setActiveSection('Map')}
+            onShowOnMap={handleShowScoringOnMap}
+            selectedLocation={selectedLocation}
+            workspaceId={workspaceId}
+            workspaceRole={workspaceRole ?? 'viewer'}
+          />
         ) : activeSection === 'Map' ? (
           <main className="map-workspace">
             <section aria-label="Tashkent map workspace" className="map-stage">
@@ -234,7 +264,9 @@ export function AppShell({
                 onFeaturesLoaded={handleFeaturesLoaded}
                 onCreateCandidate={handleMapCreateCandidate}
                 onSelectLocation={handleMapSelect}
+                onSelectScoringCandidate={handleSelectScoringCandidate}
                 radiusMeters={radiusMeters}
+                scoringCandidates={scoringCandidates}
                 selectedLocation={selectedLocation}
                 visibleLayers={visibleLayers}
                 workspaceId={workspaceId}

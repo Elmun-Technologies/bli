@@ -110,13 +110,13 @@ CREATE TABLE public.workspace_members (
 
 ## Permission matrix (as implemented)
 
-| Role | Read | Analytical write | Data administration | Imports (Phase 5) | Membership administration | Owner assignment |
-| --- | --- | --- | --- | --- | --- | --- |
-| **viewer** | workspace, organization (via membership), projects, datasets, project_datasets, locations, customers, competitors, branches, analysis_locations, membership roster of their own workspace(s); authenticated viewport + radius RPCs; import job metadata and staged-row preview | none | none | **read-only**: no upload, no mapping, no geocoding claim, no commit, no stored source file | none (cannot even change their own role) | no |
-| **analyst** | viewer reads | locations, customers, competitors, analysis_locations (insert/update/delete inside their workspace) | none — projects, datasets, branches are read-only | create jobs, upload, map, validate, geocode, place points manually, commit into an **existing** dataset; cannot create a dataset | none | no |
-| **admin** | all member reads | all analytical writes | projects, datasets, project_datasets, branches, business data | full import administration, including creating a destination dataset at commit time | add/change/remove `viewer`, `analyst`, `admin` | no |
-| **owner** | all member reads | all analytical writes | full data administration plus workspace settings (`name`, `metadata`) | full import administration, including creating a destination dataset at commit time | full membership administration, including owner grant/change/remove subject to last-owner protection | yes |
-| **service_role** | platform-default elevated access | operator paths only | `bootstrap_workspace_owner`, `grant_workspace_owner` | operator bootstrap only | yes (operator) |
+| Role | Read | Analytical write | Data administration | Imports (Phase 5) | Scoring (Phase 6) | Membership administration | Owner assignment |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **viewer** | workspace, organization (via membership), projects, datasets, project_datasets, locations, customers, competitors, branches, analysis_locations, membership roster of their own workspace(s); authenticated viewport + radius RPCs; import job metadata and staged-row preview; scoring models, saved candidates and stored analyses | none | none | **read-only**: no upload, no mapping, no geocoding claim, no commit, no stored source file | **read-only**: models, saved candidates, stored analyses and comparisons; cannot run an analysis or save a candidate | none (cannot even change their own role) | no |
+| **analyst** | viewer reads | locations, customers, competitors, analysis_locations (insert/update/delete inside their workspace) | none — projects, datasets, branches are read-only | create jobs, upload, map, validate, geocode, place points manually, commit into an **existing** dataset; cannot create a dataset | run analyses and comparisons, save candidate locations; **cannot create or edit a scoring model** | none | no |
+| **admin** | all member reads | all analytical writes | projects, datasets, project_datasets, branches, business data | full import administration, including creating a destination dataset at commit time | run scoring and create, edit or archive scoring models | add/change/remove `viewer`, `analyst`, `admin` | no |
+| **owner** | all member reads | all analytical writes | full data administration plus workspace settings (`name`, `metadata`) | full import administration, including creating a destination dataset at commit time | run scoring and create, edit or archive scoring models | full membership administration, including owner grant/change/remove subject to last-owner protection | yes |
+| **service_role** | platform-default elevated access | operator paths only | `bootstrap_workspace_owner`, `grant_workspace_owner` | operator bootstrap only | none on the tenant scoring path: no scoring RPC or table is granted to `service_role`, and no code calls it | yes (operator) | no |
 
 Branch data is intentionally owner/admin-only: nothing in Phase 1–3 required an
 analyst to create branches, so the conservative choice is the implemented one.
@@ -162,6 +162,9 @@ appears.
 | `competitors` | `competitors_select_member`, `_insert_analyst`, `_update_analyst`, `_delete_analyst` (owner/admin/analyst) |
 | `branches` | `branches_select_member`, `_insert_owner_admin`, `_update_owner_admin`, `_delete_owner_admin` |
 | `analysis_locations` | `analysis_locations_select_member`, `_insert_analyst`, `_update_analyst`, `_delete_analyst` (owner/admin/analyst) |
+| `scoring_models` (Phase 6) | `scoring_models_select_member` (SELECT), `_insert_owner_admin`, `_update_owner_admin` (owner/admin). No client `DELETE`: a model is archived, never erased, so old analyses keep explaining themselves. |
+| `scoring_model_factors` (Phase 6) | `scoring_model_factors_select_member` (SELECT through membership of the owning model's workspace), `_insert_owner_admin`, `_update_owner_admin`, `_delete_owner_admin`. An analyst can read a definition but never rewrite one. |
+| `location_analyses` / `location_analysis_results` (Phase 6) | `SELECT` for members of the analysis workspace. Deliberately **no** client write policy: `public.run_location_analysis` is their only writer, so a score can never be forged by an insert or an update. |
 
 Because the admin policies constrain `role` in **both** `USING` and
 `WITH CHECK`, an admin can neither grant `owner` nor convert themselves into an
@@ -234,6 +237,19 @@ call them at all. The routes resolve membership first
 (`resolveWorkspaceAccess`), then execute the RPC under the caller's own
 cookie-aware session — never `service_role` after a JavaScript membership
 lookup, and never a client-supplied role.
+
+## Scoring RPCs (Phase 6)
+
+Every scoring RPC asserts membership itself and runs `SECURITY INVOKER` with an explicit
+`search_path`, except `public.run_location_analysis`, which must write the two result tables that no
+client may write. That function is `SECURITY DEFINER`, schema-qualifies every reference, sets
+`search_path = pg_catalog`, checks `workspace_role` before doing anything and is the only Phase 6
+function with that posture — the RLS suite asserts exactly that.
+
+The query RPCs (`list_analysis_locations`, `save_analysis_location`, `list_location_analyses`,
+`get_location_analysis`, `create_scoring_model`, `update_scoring_model`) are `SECURITY INVOKER`, so
+RLS remains an independent layer behind every read and write. `anon` holds no `EXECUTE` right on any
+of them.
 
 ## First-owner bootstrap
 
@@ -324,6 +340,13 @@ an imported customer reaches the browser with the same allow-listed fields as
 before. The import smoke asserts the map payload carries no phone, address or
 revenue after a real import.
 
+**Phase 6 adds no new elevated-credential use.** Every scoring route uses the
+cookie-aware anon client under the caller's own session; the scoring tables grant
+`service_role` nothing, and the only `SECURITY DEFINER` function in the phase
+(`run_location_analysis`) is a database object, not a credential. No scoring path
+looks up membership in JavaScript and then switches to an elevated client, so RLS
+and the RPC's own membership assertion stay independent of the route guard.
+
 ## Workspace resolver and selector
 
 * `listAuthorizedWorkspaces(userId)` reads `workspace_members` through the
@@ -377,6 +400,26 @@ It also checks that a foreign workspace and a non-existent one produce the
 identical refusal, that a viewer can read but not write, and that a crafted
 upload body cannot redirect the file elsewhere. CI sets `GEOCODING_PROVIDER=fake`,
 so the gate needs no Mapbox token and never calls the paid service.
+
+`supabase/tests/phase6_scoring_engine.sql` and
+`supabase/tests/phase6_scoring_rls.sql` extend the same technique to scoring. The
+first drives the engine as real roles: weights that do not total 100, duplicate
+keys, rejected threshold curves, a disabled factor, the all-equal degenerate
+score, missing metrics, zero-data candidates, a very large metric, deterministic
+rounding, clamping, ranking tie-breaks, comparison limits, a snapshot that
+survives a model edit and the freshness flag. The second asserts the catalog
+posture (RLS enabled on all four tables, the expected policies, no blanket
+`USING (true)`/`WITH CHECK`, exactly one `SECURITY DEFINER` scoring function),
+the full role matrix through the RPCs, cross-workspace moves, foreign model,
+project, candidate and factor attempts (including the composite foreign key
+refusal beside the RLS refusal), and that `anon` gets nothing.
+
+The scoring smoke (`scripts/smoke-scoring-mode.ts`, run by `npm run smoke:scoring`
+and in CI) drives the shipped scoring API against the shipped production build and
+parses every raw HTTP response with the shipped client parser: models, saved
+candidates, a single analysis, a comparison, the stored read, an owner model edit
+that must not move a stored score, the refusal paths (analyst edit, viewer run,
+foreign owner, outsider, anonymous) and the comparison CSV export.
 
 ### Verified results
 

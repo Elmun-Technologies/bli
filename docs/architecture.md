@@ -184,6 +184,41 @@ Every step runs through the cookie-aware authenticated client, so RLS and the ro
 
 Import state is the staging tables plus the job row; there is no queue and no worker, so an interrupted geocoding run resumes from where it stopped rather than restarting or losing work.
 
+## Phase 6 data flow (score a site, explain the score)
+
+```
+Locations panel (client)
+  GET  scoring-models / candidates / analyses      → membership-checked routes
+  POST analyses | comparisons                      → validation → run_location_analysis
+                                                     (metrics → normalization → weights → score)
+  GET  analyses/{id}                               → the stored payload, exactly as written
+
+run_location_analysis (database, authoritative)
+  per candidate: workspace_radius_analysis (PostGIS, ST_DWithin on geography)
+                 → raw metrics (counts, exact numeric revenue, distributions, distances)
+                 → per factor: normalized value (threshold | min_max | inverse_min_max)
+                 → contribution = round(normalized × weight / 100, 2)
+                 → final score  = clamp(Σ contributions, 0, 100), 2 decimals
+  → location_analyses (snapshot: model revision, factors, radius, data_snapshot_at)
+  → location_analysis_results (raw, normalized, contributions, rank)
+
+Map
+  candidate markers A–E in stored rank order; the radius ring stays visual only
+```
+
+Rules that make the flow explainable and reproducible:
+
+- No scoring maths runs in JavaScript. The client renders raw → normalized → weight →
+  contribution → total from the stored payload and re-checks that the contributions sum to the
+  stored score before showing them.
+- The payload is the only interface between the two halves: `src/lib/scoring/payload.ts` parses it
+  strictly (`final_score` may never silently become 0) and the smoke test feeds a real HTTP response
+  through that same parser.
+- A model is a workspace-owned definition, not code. Editing it advances its revision and never
+  recalcs a stored analysis; the freshness flag is advisory only.
+- Saving a candidate is an explicit user action (`POST …/candidates`); a map click only selects a
+  point, so no analysis is ever triggered implicitly.
+
 ## Caching policy
 
 Spatial results depend on live demo data, the viewport and the radius. Both route handlers are `dynamic = 'force-dynamic'`, `revalidate = 0`, and return `Cache-Control: no-store`; client fetches use `cache: 'no-store'`. Radius analysis is a `POST` and is never cached, so a result can never be served for a different coordinate or radius. No cache-invalidation system is introduced in this phase.

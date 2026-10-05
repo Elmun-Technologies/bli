@@ -17,6 +17,7 @@ A modular Web GIS and location-intelligence workspace for commercial site select
 - **Phase 4 authentication:** minimal email/password sign-in (`/sign-in`, `POST /api/auth/sign-in`), server-side sign-out, a session refreshed by `src/proxy.ts`, and safe error messages only (`Invalid email or password.`, `You do not have access to this workspace.`, `Session expired. Please sign in again.`). No signup funnel, password reset, OAuth, magic links or profile settings.
 - **Phase 4 membership:** `workspace_members` maps auth users to workspaces with a role (`owner`, `admin`, `analyst`, `viewer`). The workspace selector lists only memberships the database returns for the caller.
 - **Phase 4 tenant GIS:** `GET /api/workspaces/[workspaceId]/map/features` and `POST /api/workspaces/[workspaceId]/analysis/radius` validate the session, resolve membership, then execute a membership-asserting RPC under the caller's own session. A foreign workspace id and a non-existent one return the identical `403` body.
+- **Phase 6 scoring:** `GET/POST /api/workspaces/[workspaceId]/scoring-models`, `GET/PATCH …/scoring-models/[modelId]`, `GET/POST …/candidates`, `GET/POST …/analyses`, `GET …/analyses/[analysisId]` and `POST …/comparisons`. A workspace model defines factors (metric, weight, direction, normalization, configuration); every score is a stored weighted sum on a 0–100 scale that the interface explains as raw → normalized → weight → contribution → total, and every analysis snapshots the model revision, weights and metrics it was run with. Nothing is scored automatically and no score is ever presented as a probability, a confidence or a prediction.
 - **Phase 5 imports:** `POST /api/workspaces/[workspaceId]/imports` and its `file`, `mapping`, `geocode-batch`, `commit`, `rows`, `rows/{rowId}/point` and `errors.csv` children. CSV/XLSX uploads are sniffed by content (never MIME), stored in the private `workspace-imports` bucket and staged; every row ends `valid`, `needs_geocoding` or `invalid` with a machine-readable code, and nothing reaches a production table until an explicit, transactional, idempotent commit.
 
 ## Phase 4 authentication, membership and RLS
@@ -42,6 +43,17 @@ The policy-by-policy and grant-by-grant reference, the elevated-credential inven
 
 Details: [docs/imports.md](docs/imports.md) and [docs/geocoding.md](docs/geocoding.md).
 
+## Phase 6 location scoring (configurable and explainable)
+
+- **No hard-coded business truth.** A `scoring_models` row owns up to twelve `scoring_model_factors`; each factor names a measured metric, an integer/2-decimal weight, a direction (`positive`, `negative`, `neutral`), a normalization method (`threshold`, `min_max`, `inverse_min_max`) and a configuration. Enabled weights must total exactly 100 — enforced by a deferred database constraint, checked again on every server request and in the editor.
+- **Server-authoritative metrics.** Raw metrics come from the PostGIS radius RPC (`customers_count`, exact `customers_revenue_total`, `competitors_count`, `branches_count`, `locations_count`, nearest branch distance, category distribution and documented derived densities). Normalization, rounding and the final `clamp(Σ contribution, 0, 100)` happen inside `public.run_location_analysis`; no scoring maths runs in JavaScript.
+- **Explainable by construction.** Each stored contribution is `round(normalized × weight / 100, 2)`, and the stored score is their sum. The panel shows the raw value, the normalized value, the weight, the contribution and a sentence naming the method, and the sum is re-checked against the stored score before it is shown. Qualitative bands (80+ Strong, 60–79 Good, 40–59 Moderate, <40 Weak) are documented as UI wording only.
+- **Reproducible snapshots.** `location_analyses` records workspace, project, candidate count, radius, model id, model **revision**, the model snapshot and the moment of the run; `location_analysis_results` records each candidate's raw metrics, normalized values, contributions and final score. Editing a model never recalculates a stored analysis, and a dataset-freshness flag (`may_be_outdated`) only warns — it never rewrites a score.
+- **Comparison.** Two to five saved candidates (hard cap 5, enforced by validation and by the RPC) are scored with one shared radius; the map labels them A–E in stored rank order, the table is sortable by overall score, customer potential, competition or revenue, and an optional CSV export copies exactly the stored numbers.
+- **Permissions.** Any member reads models, saved candidates and stored analyses; owner/admin/analyst run analyses, run comparisons and save candidates; only owner/admin create or edit models. RLS is enabled on all four Phase 6 tables with per-table policies and explicit grants, and every RPC re-asserts membership. No `service_role` is used anywhere in the scoring path.
+
+Details: [docs/scoring.md](docs/scoring.md).
+
 ## Phase 2 database foundation (unchanged)
 
 The ordered migrations add:
@@ -64,14 +76,15 @@ The ordered migrations add:
 
 ## Database verification gate
 
-**Local database status: NOT VERIFIED HERE.** The project-local Supabase CLI is pinned to `2.119.0`, but Docker and `psql` are unavailable in this workspace. `.github/workflows/database-integrity.yml` is the release gate, and it is green for the Phase 4 commit:
+`.github/workflows/database-integrity.yml` is the release gate and it is the only environment that verifies the whole stack:
 
 - it starts the full local Supabase stack (`supabase start` minus studio/mail/realtime/storage/analytics), replays every migration from zero and loads `supabase/seed.sql`;
-- it runs the live Phase 2 catalog/integrity assertions, the Phase 3 spatial/index assertions and the Phase 4 membership/RLS/grant assertions with fail-fast `psql` (PostgreSQL 17.11, PostGIS 3.3.7 in CI);
+- it runs the live Phase 2 catalog/integrity, Phase 3 spatial/index, Phase 4 membership/RLS/grant, Phase 5 import/storage and **Phase 6 scoring engine and scoring RLS** assertions with fail-fast `psql` (PostgreSQL 17.11, PostGIS 3.3.7 in CI);
 - it regenerates `src/lib/database/database.types.ts` and fails on drift;
 - it runs `npm test`, lint, typecheck and the production build;
-- it runs the Phase 5 import assertions: upload to the private bucket, mapping, per-row validation, a fake-provider geocoding batch, the error export, commit idempotency and re-point refusal, plus the storage/RLS grant matrix;
-- it runs three end-to-end smokes against the shipped production build: the fixtures smoke, the authenticated smoke (sign-in, protected page, selector, both tenant GIS endpoints, workspace-id tampering, cross-workspace denial, the still-public demo endpoint, sign-out) and the import smoke (wizard client → API → storage → staging → commit → map visibility).
+- it runs four end-to-end smokes against the shipped production build: the fixtures smoke, the authenticated smoke (sign-in, protected page, selector, tenant GIS, workspace-id tampering, cross-workspace denial, the still-public demo endpoint, sign-out), the import smoke (wizard client → API → storage → staging → commit → map visibility) and the **scoring smoke** (models, saved candidates, a single analysis, a comparison, the stored read, snapshot survival across a model edit and every refusal path, with each response parsed by the shipped client parser).
+
+Local SQL work is additionally verified before pushing with a PGlite + PostGIS harness that replays the migrations and runs the same suites, and the app-level gates (`npm test`, `npm run lint`, `npm run typecheck`, `npm run build`) run anywhere. Docker, `psql` and a local Supabase stack are still unavailable in the authoring sandbox, so the smokes and the live catalog assertions are only authoritative in CI.
 
 **A green TypeScript build alone does not validate SQL.** See [docs/setup.md](docs/setup.md).
 
@@ -176,7 +189,7 @@ Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/ad
 3. **Phase 3 — DB-backed demo map and radius analysis (implemented):** server-side viewport features, PostGIS `ST_DWithin` radius aggregates, safe DTOs, demo-workspace boundary, server-only elevated credential.
 4. **Phase 4 — authentication and membership (implemented):** Supabase Auth email/password sign-in, `workspace_members` roles, deliberate per-table RLS policies with explicit grants, membership-checked tenant GIS RPCs, a protected workspace route and a minimal selector. The fixed demo path is unchanged.
 5. **Phase 5 — data operations (implemented):** CSV/XLSX imports with column mapping, per-row validation, provenance, private storage, provider-abstracted geocoding (Mapbox permanent results, fake provider in CI), manual placement, transactional commit and a safe error export.
-6. **Phase 6 — intelligence (not started):** configurable, explainable scores and candidate comparison.
+6. **Phase 6 — intelligence (implemented):** configurable, explainable location scoring with versioned model snapshots, saved candidate sites and a 2–5 site comparison.
 7. **Phase 7 — reporting, tiles and optimization (not started):** vector tiles/`ST_AsMVT` at larger scale, exports and performance work.
 
 ## Documentation
@@ -189,3 +202,4 @@ Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/ad
 - [Deployment checklist and security gates](docs/deployment.md)
 - [Imports: formats, limits, geocoding and commit](docs/imports.md)
 - [Geocoding providers, Mapbox v6 and confidence policy](docs/geocoding.md)
+- [Location scoring: factors, normalization, snapshots and permissions](docs/scoring.md)

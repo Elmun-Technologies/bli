@@ -118,11 +118,14 @@ npm run smoke:fixtures
 # with a running, seeded local Supabase (see below) and its credentials in the environment:
 npm run smoke:auth       # sign-in, membership, tenant GIS, demo isolation
 npm run smoke:imports    # upload → mapping → validation → geocode (fake) → commit → map
+npm run smoke:scoring    # models → candidates → analysis → comparison → snapshot → refusals
 ```
 
 `smoke:imports` deliberately imports customers into the seeded workspace it is given, so run it against a local/CI database, not a shared one; it asserts only on the datasets and rows it created itself, and its dataset name carries a per-run suffix.
 
-`npm test` covers domain, DTO, parser, validation and server-boundary units. `npm run smoke:fixtures` builds nothing itself; run it after `npm run build`, and it will start the production server with `DATA_SOURCE=fixtures` on a spare port (override with `SMOKE_PORT`), drive the shipped browser client against the shipped route handlers, and stop the server again. It needs no database or credentials, and it exists because database mode and fixtures mode can each pass their own tests while disagreeing with each other.
+`smoke:scoring` scores the seeded candidate sites with the seeded model, edits and restores that model (proving a stored analysis never moves) and then checks every refusal path; it writes only analyses, and it is the CI proof that a real server payload parses through the shipped client parser. Like `smoke:imports`, it needs the local/CI Supabase stack.
+
+`npm test` covers domain, DTO, parser, validation, scoring and server-boundary units. `npm run smoke:fixtures` builds nothing itself; run it after `npm run build`, and it will start the production server with `DATA_SOURCE=fixtures` on a spare port (override with `SMOKE_PORT`), drive the shipped browser client against the shipped route handlers, and stop the server again. It needs no database or credentials, and it exists because database mode and fixtures mode can each pass their own tests while disagreeing with each other.
 
 These application checks complement—not replace—the clean database verification gate.
 

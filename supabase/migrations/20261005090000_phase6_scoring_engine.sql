@@ -804,10 +804,10 @@ BEGIN
   IF p_workspace_id IS NULL THEN
     RAISE EXCEPTION USING ERRCODE = '22023', MESSAGE = 'Workspace id is required';
   END IF;
-  IF NOT public.has_workspace_role(
+  IF public.has_workspace_role(
     p_workspace_id,
     ARRAY['owner', 'admin']::public.workspace_member_role[]
-  ) THEN
+  ) IS NOT TRUE THEN
     RAISE EXCEPTION USING
       ERRCODE = '42501',
       MESSAGE = 'Managing scoring models requires owner or admin membership';
@@ -865,10 +865,10 @@ BEGIN
   IF model.id IS NULL THEN
     RAISE EXCEPTION USING ERRCODE = 'P0002', MESSAGE = 'Scoring model not found';
   END IF;
-  IF NOT public.has_workspace_role(
+  IF public.has_workspace_role(
     model.workspace_id,
     ARRAY['owner', 'admin']::public.workspace_member_role[]
-  ) THEN
+  ) IS NOT TRUE THEN
     RAISE EXCEPTION USING
       ERRCODE = '42501',
       MESSAGE = 'Managing scoring models requires owner or admin membership';
@@ -1140,10 +1140,10 @@ BEGIN
 
   -- Authorization precedes state errors, so an outsider learns nothing about
   -- whether the project, the model or the candidates exist.
-  IF NOT public.has_workspace_role(
+  IF public.has_workspace_role(
     p_workspace_id,
     ARRAY['owner', 'admin', 'analyst']::public.workspace_member_role[]
-  ) THEN
+  ) IS NOT TRUE THEN
     RAISE EXCEPTION USING
       ERRCODE = '42501',
       MESSAGE = 'Running a location analysis requires owner, admin or analyst membership';
