@@ -24,6 +24,16 @@ SUPABASE_URL=http://127.0.0.1:54321
 SUPABASE_SECRET_KEY=<local service/secret key from `supabase status --output env`>
 ```
 
+Report maps are opt-in and separate: set `MAPBOX_ACCESS_TOKEN` (server-only, never
+`NEXT_PUBLIC_*`) to embed a Mapbox Static Images map in generated reports, and
+`REPORT_MAP_STYLE` to override the style. Leave both unset and reports are still
+generated, stating that no static map is included. For the end-to-end report smoke
+use the deterministic fixture provider instead of a token:
+
+```bash
+REPORT_MAP_PROVIDER=fake npm run smoke:reports
+```
+
 The elevated key is read only by `src/lib/supabase/admin.ts` (`server-only`) and is never sent to the browser. For a display-only preview without any database, set `DATA_SOURCE=fixtures`: the map then shows the deterministic synthetic fixtures and the analysis panel reports that analysis is disabled. Radius analysis **never** uses fixtures. There is no automatic fallback from a failing database request to fixture data — a database failure stays visible during development.
 
 ## Reproducible database verification
@@ -97,7 +107,7 @@ Generated Supabase row types are persistence-only. `row-types.ts` now aliases ge
 
 ## Current local verification status
 
-The project CLI is installed and reports `2.119.0`, but Docker and `psql` are unavailable in this workspace, so local database startup, migration replay and catalog assertions have not run here. GitHub Actions is the authoritative live PostgreSQL/PostGIS verification path and is green for Phase 4: the clean-reset job replayed every migration, ran the Phase 2, Phase 3 and Phase 4 suites, regenerated and checked the database types, and both end-to-end smokes (fixtures and authenticated) passed against the production build. Runtime observations from CI have reported PostgreSQL `17.11` and PostGIS extension/library `3.3.7`; use versions printed by an actual run rather than researched or expected values. Phase 5 extends the same gate: the stack now also starts the Storage API, the Phase 5 import and geocoding suites run against the same fresh database, and the import smoke exercises the whole pipeline against the production build with `GEOCODING_PROVIDER=fake`.
+The project CLI is installed and reports `2.119.0`, but Docker and `psql` are unavailable in this workspace, so local database startup, migration replay and catalog assertions have not run here. GitHub Actions is the authoritative live PostgreSQL/PostGIS verification path and is green for Phase 4: the clean-reset job replayed every migration, ran the Phase 2, Phase 3 and Phase 4 suites, regenerated and checked the database types, and both end-to-end smokes (fixtures and authenticated) passed against the production build. Runtime observations from CI have reported PostgreSQL `17.11` and PostGIS extension/library `3.3.7`; use versions printed by an actual run rather than researched or expected values. Phase 5 extends the same gate: the stack now also starts the Storage API, the Phase 5 import and geocoding suites run against the same fresh database, and the import smoke exercises the whole pipeline against the production build with `GEOCODING_PROVIDER=fake`, and Phase 7 adds the report suite plus `smoke:reports` with `REPORT_MAP_PROVIDER=fake`.
 
 ## Demo data and the workspace boundary
 
@@ -125,7 +135,7 @@ npm run smoke:scoring    # models → candidates → analysis → comparison →
 
 `smoke:scoring` scores the seeded candidate sites with the seeded model, edits and restores that model (proving a stored analysis never moves) and then checks every refusal path; it writes only analyses, and it is the CI proof that a real server payload parses through the shipped client parser. It also covers the Phase 6.5 project rules: it creates a second project (owner only), proves the unnamed-project `400`, that a foreign and a non-existent project id fail byte-for-byte alike, that each project lists only its own saved candidates and analyses, that a mixed-project comparison is refused without storing anything, and that the workspace model scores a candidate in either project. Like `smoke:imports`, it needs the local/CI Supabase stack.
 
-`npm test` covers domain, DTO, parser, validation, scoring and server-boundary units. `npm run smoke:fixtures` builds nothing itself; run it after `npm run build`, and it will start the production server with `DATA_SOURCE=fixtures` on a spare port (override with `SMOKE_PORT`), drive the shipped browser client against the shipped route handlers, and stop the server again. It needs no database or credentials, and it exists because database mode and fixtures mode can each pass their own tests while disagreeing with each other.
+`npm test` covers domain, DTO, parser, validation, scoring, reports and server-boundary units. `npm run smoke:fixtures` builds nothing itself; run it after `npm run build`, and it will start the production server with `DATA_SOURCE=fixtures` on a spare port (override with `SMOKE_PORT`), drive the shipped browser client against the shipped route handlers, and stop the server again. It needs no database or credentials, and it exists because database mode and fixtures mode can each pass their own tests while disagreeing with each other.
 
 These application checks complement—not replace—the clean database verification gate.
 

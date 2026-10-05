@@ -24,6 +24,37 @@ isOneToOne: false
       referencedColumns: ["id","workspace_id"]
     }
                   ]
+                },"analysis_reports": {
+                  Row: {
+                    "analysis_id": string,"company_name": string | null,"configuration": NonNullable<Json>,"created_at": string,"created_by": string,"failure_code": string | null,"generated_at": string | null,"id": string,"logo_mime_type": string | null,"logo_size_bytes": number | null,"logo_storage_path": string | null,"map_storage_path": string | null,"project_id": string,"report_type": Database["public"]['Enums']["analysis_report_type"],"snapshot": Json | null,"snapshot_hash": string | null,"status": Database["public"]['Enums']["analysis_report_status"],"storage_path": string | null,"subtitle": string | null,"title": string,"updated_at": string,"workspace_id": string
+                  }
+                  Insert: {
+                    "analysis_id": string,"company_name"?: string | null,"configuration"?: NonNullable<Json>,"created_at"?: string,"created_by": string,"failure_code"?: string | null,"generated_at"?: string | null,"id"?: string,"logo_mime_type"?: string | null,"logo_size_bytes"?: number | null,"logo_storage_path"?: string | null,"map_storage_path"?: string | null,"project_id": string,"report_type": Database["public"]['Enums']["analysis_report_type"],"snapshot"?: Json | null,"snapshot_hash"?: string | null,"status"?: Database["public"]['Enums']["analysis_report_status"],"storage_path"?: string | null,"subtitle"?: string | null,"title": string,"updated_at"?: string,"workspace_id": string
+                  }
+                  Update: {
+                    "analysis_id"?: string,"company_name"?: string | null,"configuration"?: NonNullable<Json>,"created_at"?: string,"created_by"?: string,"failure_code"?: string | null,"generated_at"?: string | null,"id"?: string,"logo_mime_type"?: string | null,"logo_size_bytes"?: number | null,"logo_storage_path"?: string | null,"map_storage_path"?: string | null,"project_id"?: string,"report_type"?: Database["public"]['Enums']["analysis_report_type"],"snapshot"?: Json | null,"snapshot_hash"?: string | null,"status"?: Database["public"]['Enums']["analysis_report_status"],"storage_path"?: string | null,"subtitle"?: string | null,"title"?: string,"updated_at"?: string,"workspace_id"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "analysis_reports_analysis_fk"
+      columns: ["analysis_id","project_id","workspace_id"]
+isOneToOne: false
+      referencedRelation: "location_analyses"
+      referencedColumns: ["id","project_id","workspace_id"]
+    },{
+      foreignKeyName: "analysis_reports_project_fk"
+      columns: ["project_id","workspace_id"]
+isOneToOne: false
+      referencedRelation: "projects"
+      referencedColumns: ["id","workspace_id"]
+    },{
+      foreignKeyName: "analysis_reports_workspace_fk"
+      columns: ["workspace_id"]
+isOneToOne: false
+      referencedRelation: "workspaces"
+      referencedColumns: ["id"]
+    }
+                  ]
                 },"branches": {
                   Row: {
                     "address": string | null,"created_at": string,"customers_count": number | null,"dataset_id": string,"external_id": string | null,"id": string,"import_job_id": string | null,"metadata": NonNullable<Json>,"name": string,"revenue": number | null,"source_row_number": number | null,"spatial_point": unknown,"updated_at": string,"workspace_id": string
@@ -455,6 +486,9 @@ isOneToOne: false
               "committed_rows": number,"failed_geocoding_rows": number,"geocoded_rows": number,"invalid_rows": number,"job_status": Database["public"]['Enums']["import_job_status"],"needs_geocoding_rows": number,"total_rows": number,"valid_rows": number
             }[]
                            },
+"report_object_workspace_id":
+{ Args: { "p_object_name": string }; Returns: string
+                           },
 "run_location_analysis":
 { Args: { "p_candidate_ids": (string)[],"p_mode"?: string,"p_project_id": string,"p_radius_meters": number,"p_scoring_model_id": string,"p_workspace_id": string }; Returns: Json
                            },
@@ -505,7 +539,7 @@ isOneToOne: false
                            }
           }
           Enums: {
-            "import_file_type": "csv"|"xlsx","import_job_status": "uploaded"|"mapping_required"|"ready"|"review_required"|"completed"|"failed","import_row_geocoding_status": "not_required"|"pending"|"geocoding"|"success"|"ambiguous"|"no_match"|"provider_error"|"rate_limited"|"manual_override","import_row_validation_status": "pending"|"valid"|"needs_geocoding"|"invalid","import_target_entity": "customers"|"locations","scoring_factor_direction": "positive"|"negative"|"neutral","scoring_model_status": "draft"|"active"|"archived","scoring_normalization": "min_max"|"inverse_min_max"|"threshold","workspace_member_role": "owner"|"admin"|"analyst"|"viewer"
+            "analysis_report_status": "draft"|"generating"|"ready"|"failed","analysis_report_type": "single_location"|"comparison","import_file_type": "csv"|"xlsx","import_job_status": "uploaded"|"mapping_required"|"ready"|"review_required"|"completed"|"failed","import_row_geocoding_status": "not_required"|"pending"|"geocoding"|"success"|"ambiguous"|"no_match"|"provider_error"|"rate_limited"|"manual_override","import_row_validation_status": "pending"|"valid"|"needs_geocoding"|"invalid","import_target_entity": "customers"|"locations","scoring_factor_direction": "positive"|"negative"|"neutral","scoring_model_status": "draft"|"active"|"archived","scoring_normalization": "min_max"|"inverse_min_max"|"threshold","workspace_member_role": "owner"|"admin"|"analyst"|"viewer"
           }
           CompositeTypes: {
             [_ in never]: never
@@ -621,7 +655,7 @@ export type CompositeTypes<
 export const Constants = {
   "public": {
           Enums: {
-            "import_file_type": ["csv", "xlsx"],"import_job_status": ["uploaded", "mapping_required", "ready", "review_required", "completed", "failed"],"import_row_geocoding_status": ["not_required", "pending", "geocoding", "success", "ambiguous", "no_match", "provider_error", "rate_limited", "manual_override"],"import_row_validation_status": ["pending", "valid", "needs_geocoding", "invalid"],"import_target_entity": ["customers", "locations"],"scoring_factor_direction": ["positive", "negative", "neutral"],"scoring_model_status": ["draft", "active", "archived"],"scoring_normalization": ["min_max", "inverse_min_max", "threshold"],"workspace_member_role": ["owner", "admin", "analyst", "viewer"]
+            "analysis_report_status": ["draft", "generating", "ready", "failed"],"analysis_report_type": ["single_location", "comparison"],"import_file_type": ["csv", "xlsx"],"import_job_status": ["uploaded", "mapping_required", "ready", "review_required", "completed", "failed"],"import_row_geocoding_status": ["not_required", "pending", "geocoding", "success", "ambiguous", "no_match", "provider_error", "rate_limited", "manual_override"],"import_row_validation_status": ["pending", "valid", "needs_geocoding", "invalid"],"import_target_entity": ["customers", "locations"],"scoring_factor_direction": ["positive", "negative", "neutral"],"scoring_model_status": ["draft", "active", "archived"],"scoring_normalization": ["min_max", "inverse_min_max", "threshold"],"workspace_member_role": ["owner", "admin", "analyst", "viewer"]
           }
         }
 } as const

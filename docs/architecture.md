@@ -229,6 +229,44 @@ Rules that make the flow explainable and reproducible:
   belonged to the previous project when the selector changes. The URL (`?project=<uuid>`) is a deep
   link only — the server re-validates on every request.
 
+## Phase 7 data flow (stored analysis → report → PDF)
+
+```text
+stored analysis (Phase 6, immutable)
+   │  POST /reports                       owner/admin/analyst
+   ▼
+ReportSnapshot (deterministic projection, canonical JSON, SHA-256 stored)
+   │  frozen by a database trigger; nothing recomputes a number
+   │  POST /reports/{id}/generate
+   ▼
+ReportViewModel ──┬─► ReportPreview (HTML, React)         GET /reports/{id}
+                  │
+                  ├─► ReportMapProvider (Mapbox static | fake fixture) ─► map.png
+                  │
+                  └─► ReportDocument (@react-pdf/renderer, Node, no browser) ─► report.pdf
+   ▼
+private bucket analysis-reports/{workspace}/{project}/{report}/…
+   ▼
+GET /reports/{id}/download  (session + membership + RLS re-checked, no-store)
+```
+
+Design rules:
+
+- **Two steps, two artifacts.** Creating a report freezes the snapshot; generating
+  produces the PDF. Regeneration re-renders the *same* snapshot and verifies its
+  hash first.
+- **One view model.** The preview and the PDF both render `ReportViewModel`; no
+  business number is derived twice, and neither path reads the database for a
+  figure.
+- **The PDF is rendered in-process** by a pure-JavaScript renderer. No headless
+  browser, no Docker, no external service, no network call at render time (the
+  only outbound call is the optional static-map request).
+- **Failure is safe.** A provider or render failure marks the report `failed`,
+  keeps the snapshot untouched and allows a retry; no partial or misleading
+  artifact is presented as a report.
+- **Project context is unchanged from Phase 6.5.** A report belongs to one
+  project, never mixes two, and never resolves a project implicitly.
+
 ## Caching policy
 
 Spatial results depend on live demo data, the viewport and the radius. Both route handlers are `dynamic = 'force-dynamic'`, `revalidate = 0`, and return `Cache-Control: no-store`; client fetches use `cache: 'no-store'`. Radius analysis is a `POST` and is never cached, so a result can never be served for a different coordinate or radius. No cache-invalidation system is introduced in this phase.
@@ -251,6 +289,10 @@ src/
   lib/imports/                     Limits, parsers, mapping, normalization, validation,
                                    geocoding (provider abstraction + batch runner),
                                    export, service (staging/commit), route guard, HTTP mapping
+  lib/reports/                     Snapshot + hash, deterministic summary, view model,
+                                   strict parser, validation, messages, service, route guard,
+                                   HTTP mapping, map/ (provider, fake, Mapbox), pdf/
+                                   (document, render, image rules), preview/ (HTML)
   lib/supabase/                    server.ts (anon SSR) and admin.ts (server-only elevated)
 supabase/
   migrations/                      Ordered Phase 1-5 SQL migrations
@@ -260,11 +302,16 @@ supabase/
   tests/phase4_membership_rls.sql  Phase 4 membership/RLS/grant assertions (rollback-only)
   tests/phase5_import_rls.sql      Phase 5 import, storage, commit and grant assertions
   tests/phase5_geocoding.sql       Phase 5 geocoding batch/resume/idempotency assertions
+  tests/phase6_scoring_engine.sql  Phase 6 scoring engine, snapshot and freshness assertions
+  tests/phase6_scoring_rls.sql     Phase 6 scoring permissions and forgery assertions
+  tests/phase7_reports_rls.sql     Phase 7 report permissions, lifecycle, immutability and
+                                   storage-path assertions
 ```
 
-## Future architecture checkpoints (not Phase 5 deliverables)
+## Future architecture checkpoints (not Phase 7 deliverables)
 
 - Revisit server-side tiles/clustering only after measuring viewport volume at realistic data sizes.
-- Add analytics/scoring only after product definitions and a server-side query contract are agreed.
-- Retention automation (lifecycle rules on the import bucket) when an operator decides a policy; Phase 5 leaves source files for the lifetime of the job.
+- Portfolio/multi-analysis reporting only when a product definition exists; Phase 7 deliberately reports one stored analysis at a time.
+- A job queue for very large reports only if a measured need appears; Phase 7 generation is synchronous and the UI says so.
+- Retention automation (lifecycle rules on the import and report buckets) when an operator decides a policy; Phase 5 leaves source files and Phase 7 leaves report artifacts for the lifetime of their records.
 - Streaming/resumable uploads and per-row editing only when a real need for files beyond 5 MB or 10 000 rows appears; the staging pipeline is already reusable for further target entities.

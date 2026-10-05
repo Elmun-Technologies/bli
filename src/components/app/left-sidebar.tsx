@@ -46,7 +46,7 @@ const MAIN_NAVIGATION: NavigationItem[] = [
 const DATA_NAVIGATION: NavigationItem[] = [
   { label: 'Datasets', icon: Database, phase: 'Phase 5' },
   { label: 'Analysis', icon: BarChart3, phase: 'Phase 4' },
-  { label: 'Reports', icon: FileText, phase: 'Phase 8' },
+  { label: 'Reports', icon: FileText, phase: undefined },
 ];
 
 interface LeftSidebarProps {
@@ -132,7 +132,7 @@ export function LeftSidebar({ activeSection, onNavigate }: LeftSidebarProps) {
         >
           <Settings2 aria-hidden="true" size={17} strokeWidth={1.8} />
           <span className="sidebar-nav-item__label">Settings</span>
-          <span className="sidebar-nav-item__phase">Phase 7</span>
+          <span className="sidebar-nav-item__phase">Later</span>
         </button>
         <div className="sidebar-help">
           <CircleHelp aria-hidden="true" size={16} strokeWidth={1.8} />

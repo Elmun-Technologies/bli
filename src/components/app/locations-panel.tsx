@@ -25,6 +25,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 
+import { ReportCreateButton } from '@/components/app/report-create-button';
 import { ScoringModelEditor } from '@/components/app/scoring-model-editor';
 import {
   analysisFreshnessMessage,
@@ -125,6 +126,7 @@ export function LocationsPanel({
   onFocusedCandidateHandled,
   onShowOnMap,
   onOpenMap,
+  onOpenReport,
 }: {
   workspaceId: string;
   workspaceRole: string;
@@ -136,6 +138,8 @@ export function LocationsPanel({
   onFocusedCandidateHandled: () => void;
   onShowOnMap: (candidates: ScoringMapCandidate[]) => void;
   onOpenMap: () => void;
+  /** Opens the reports section focused on a freshly created report. */
+  onOpenReport: (reportId: string) => void;
 }) {
   const canRun = RUN_ROLES.has(workspaceRole);
   const canManage = MANAGE_ROLES.has(workspaceRole);
@@ -788,8 +792,11 @@ export function LocationsPanel({
 
           {payload ? (
             <StoredAnalysis
+              canRun={canRun}
               onOpenMap={onOpenMap}
+              onOpenReport={onOpenReport}
               onShowOnMap={() => onShowOnMap(mapCandidatesFromPayload(payload))}
+              workspaceId={workspaceId}
               openBreakdownId={openBreakdownId}
               payload={payload}
               setOpenBreakdownId={setOpenBreakdownId}
@@ -842,20 +849,26 @@ export function LocationsPanel({
 
 function StoredAnalysis({
   payload,
+  workspaceId,
+  canRun,
   sortKey,
   setSortKey,
   openBreakdownId,
   setOpenBreakdownId,
   onShowOnMap,
   onOpenMap,
+  onOpenReport,
 }: {
   payload: ScoringAnalysisPayload;
+  workspaceId: string;
+  canRun: boolean;
   sortKey: ComparisonSortKey;
   setSortKey: (key: ComparisonSortKey) => void;
   openBreakdownId: string | null;
   setOpenBreakdownId: (candidateId: string | null) => void;
   onShowOnMap: () => void;
   onOpenMap: () => void;
+  onOpenReport: (reportId: string) => void;
 }) {
   const headline = analysisHeadline(payload);
   const freshness = analysisFreshnessMessage(payload);
@@ -911,6 +924,13 @@ function StoredAnalysis({
         <button className="scoring-button scoring-button--quiet" onClick={onOpenMap} type="button">
           <ArrowRight aria-hidden="true" size={13} /> Open the map
         </button>
+        <ReportCreateButton
+          analysisId={payload.analysis.id}
+          disabled={!canRun}
+          onCreated={onOpenReport}
+          projectId={payload.analysis.projectId}
+          workspaceId={workspaceId}
+        />
         {payload.analysis.mode === 'comparison' ? (
           <button
             className="scoring-button scoring-button--quiet"

@@ -179,6 +179,16 @@ jobs:
         run: |
           printf '::notice title=scoring smoke::the smoke drives the shipped scoring API, parses every response with the shipped parser and prints the failing scenario plus the server log tail.\n'
 
+      - name: Report end-to-end smoke (create, snapshot, map provider, PDF, download, refusals)
+        run: npm run smoke:reports
+        env:
+          REPORT_MAP_PROVIDER: fake
+
+      - name: Report smoke failure diagnostics
+        if: failure()
+        run: |
+          printf '::notice title=report smoke::the smoke drives the shipped report API with the deterministic fake map provider (no Mapbox token, no map credits), parses every response with the shipped parser and prints the failing scenario plus the server log tail.\n'
+
       - name: Stop local Supabase stack
         if: always()
         run: supabase stop --no-backup || true

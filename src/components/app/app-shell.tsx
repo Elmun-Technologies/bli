@@ -12,6 +12,7 @@ import {
 import { ComingSoon } from '@/components/app/coming-soon';
 import { ImportWizard } from '@/components/app/import-wizard';
 import { LocationsPanel } from '@/components/app/locations-panel';
+import { ReportsPanel } from '@/components/app/reports-panel';
 import type { ScoringMapCandidate } from '@/components/app/scoring-state';
 import { LeftSidebar, type WorkspaceSection } from '@/components/app/left-sidebar';
 import { MapLayerControl } from '@/components/app/map-layer-control';
@@ -85,6 +86,7 @@ export function AppShell({
   const [analysis, setAnalysis] = useState<AnalysisState>(IDLE_ANALYSIS_STATE);
   const [scoringCandidates, setScoringCandidates] = useState<ScoringMapCandidate[]>([]);
   const [focusedScoringCandidateId, setFocusedScoringCandidateId] = useState<string | null>(null);
+  const [focusedReportId, setFocusedReportId] = useState<string | null>(null);
   const analysisRequestRef = useRef<AbortController | null>(null);
   const focusRequestId = useRef(0);
   const candidateNumber = useRef(1);
@@ -127,6 +129,13 @@ export function AppShell({
 
   const handleFocusedCandidateHandled = useCallback(() => {
     setFocusedScoringCandidateId(null);
+  }, []);
+
+  // A freshly generated report opens straight in the reports section, where the
+  // user can preview it, download it or regenerate the same snapshot.
+  const handleOpenReport = useCallback((reportId: string) => {
+    setFocusedReportId(reportId);
+    setActiveSection('Reports');
   }, []);
 
   const handleToggleLayer = useCallback((layer: MapLayerId) => {
@@ -256,8 +265,16 @@ export function AppShell({
             initialProjectId={initialProjectId}
             onFocusedCandidateHandled={handleFocusedCandidateHandled}
             onOpenMap={() => setActiveSection('Map')}
+            onOpenReport={handleOpenReport}
             onShowOnMap={handleShowScoringOnMap}
             selectedLocation={selectedLocation}
+            workspaceId={workspaceId}
+            workspaceRole={workspaceRole ?? 'viewer'}
+          />
+        ) : activeSection === 'Reports' && workspaceId ? (
+          <ReportsPanel
+            focusedReportId={focusedReportId}
+            initialProjectId={initialProjectId}
             workspaceId={workspaceId}
             workspaceRole={workspaceRole ?? 'viewer'}
           />

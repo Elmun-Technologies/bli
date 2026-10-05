@@ -3450,3 +3450,380 @@ input:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+/* ------------------------------------------------------------------ Phase 7 */
+/* Reports: history, actions and the HTML preview of a stored snapshot.       */
+
+.reports-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px 22px 32px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.reports-panel h1,
+.reports-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reports-project {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #5b6b7c;
+}
+
+.reports-project select,
+.report-detail__tools input[type='text'],
+.report-create-from-analysis__form input {
+  border: 1px solid #dfe5ea;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #1f2a37;
+  font-size: 11px;
+  padding: 5px 8px;
+}
+
+.report-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-history__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid #dfe5ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.report-history__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 240px;
+}
+
+.report-history__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2a37;
+}
+
+.report-history__meta {
+  font-size: 10px;
+  color: #8b97a4;
+}
+
+.report-history__failure {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #8a5a00;
+}
+
+.report-history__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.report-history__actions a.scoring-button {
+  text-decoration: none;
+}
+
+.report-status {
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.report-status--draft {
+  background: #eef2f5;
+  color: #5b6b7c;
+}
+
+.report-status--generating {
+  background: #eef3f8;
+  color: #1f4e79;
+}
+
+.report-status--ready {
+  background: #e8f4ec;
+  color: #256b3f;
+}
+
+.report-status--failed {
+  background: #fdf6e6;
+  color: #8a5a00;
+}
+
+.report-permission-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #5b6b7c;
+}
+
+.report-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid #dfe5ea;
+  padding-top: 14px;
+}
+
+.report-detail__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #5b6b7c;
+}
+
+.report-detail__tools-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #8b97a4;
+}
+
+.report-detail__file {
+  font-size: 10px;
+}
+
+.report-create-from-analysis {
+  border: 1px dashed #dfe5ea;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 11px;
+  color: #5b6b7c;
+}
+
+.report-create-from-analysis summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: #1f2a37;
+}
+
+.report-create-from-analysis__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.report-create-from-analysis__form input {
+  flex: 1 1 260px;
+}
+
+.report-create-button {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-create-button__error {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #8a4a3c;
+  font-size: 10px;
+}
+
+.report-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid #dfe5ea;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 22px 24px;
+  max-width: 900px;
+}
+
+.report-preview__cover {
+  border-bottom: 1px solid #dfe5ea;
+  padding-bottom: 14px;
+}
+
+.report-preview__logo {
+  display: block;
+  max-height: 52px;
+  max-width: 200px;
+  margin-bottom: 12px;
+  object-fit: contain;
+}
+
+.report-preview__eyebrow {
+  margin: 0 0 6px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.4px;
+  color: #1f4e79;
+}
+
+.report-preview__cover h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  color: #1f2a37;
+}
+
+.report-preview__subtitle {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #5b6b7c;
+}
+
+.report-preview__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.report-preview__section h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #1f4e79;
+}
+
+.report-preview__section h4 {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #1f2a37;
+}
+
+.report-preview__section p {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #384654;
+}
+
+.report-preview__headline {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #1f4e79;
+}
+
+.report-preview__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 6px 18px;
+  margin: 0;
+}
+
+.report-preview__meta div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.report-preview__meta dt {
+  font-size: 8.5px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #8b97a4;
+}
+
+.report-preview__meta dd {
+  margin: 0;
+  font-size: 11px;
+  color: #1f2a37;
+}
+
+.report-preview__hash {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 9px;
+  word-break: break-all;
+  color: #5b6b7c;
+}
+
+.report-preview__list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #384654;
+}
+
+.report-preview__figure {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-preview__map {
+  width: 100%;
+  border: 1px solid #dfe5ea;
+  border-radius: 6px;
+}
+
+.report-preview__figure figcaption {
+  font-size: 9px;
+  color: #8b97a4;
+}
+
+.report-preview__note {
+  border: 1px solid #edd9ad;
+  border-radius: 6px;
+  background: #fdf6e6;
+  padding: 8px 10px;
+  font-size: 10.5px;
+  color: #8a5a00;
+}
+
+.report-preview__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+
+.report-preview__table caption {
+  caption-side: top;
+  text-align: left;
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #8b97a4;
+  padding-bottom: 4px;
+}
+
+.report-preview__table th,
+.report-preview__table td {
+  border-bottom: 1px solid #eef2f5;
+  padding: 5px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-preview__table thead th {
+  background: #f4f7f9;
+  font-size: 9px;
+  color: #5b6b7c;
+}

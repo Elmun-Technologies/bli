@@ -173,6 +173,8 @@ run_stage "Verify Phase 6 scoring engine, normalization, snapshot and freshness 
   psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase6_scoring_engine.sql
 run_stage "Verify Phase 6 scoring permissions, cross-workspace and forgery assertions" \
   psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase6_scoring_rls.sql
+run_stage "Verify Phase 7 report permissions, snapshot immutability and storage-path assertions" \
+  psql "$database_url" -X -v ON_ERROR_STOP=1 -f supabase/tests/phase7_reports_rls.sql
 
 CURRENT_STAGE="generate TypeScript types from the verified local schema"
 mkdir -p src/lib/database

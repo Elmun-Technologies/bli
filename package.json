@@ -12,15 +12,17 @@
     "start": "next start --hostname 0.0.0.0",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/geo/*.test.ts src/lib/domain/*.test.ts src/lib/map/*.test.ts src/lib/spatial/*.test.ts src/lib/imports/*.test.ts src/lib/imports/parse/*.test.ts src/lib/imports/geocoding/*.test.ts src/lib/scoring/*.test.ts src/components/app/*.test.ts",
+    "test": "tsx --test src/lib/geo/*.test.ts src/lib/domain/*.test.ts src/lib/map/*.test.ts src/lib/spatial/*.test.ts src/lib/imports/*.test.ts src/lib/imports/parse/*.test.ts src/lib/imports/geocoding/*.test.ts src/lib/scoring/*.test.ts src/lib/reports/*.test.ts src/lib/reports/map/*.test.ts src/lib/reports/pdf/*.test.ts src/components/app/*.test.ts",
     "smoke:fixtures": "tsx scripts/smoke-fixtures-mode.ts",
     "smoke:auth": "tsx scripts/smoke-auth-mode.ts",
     "verify:database": "bash scripts/verify-database.sh",
     "verify": "npm run verify:database && npm test && npm run lint && npm run typecheck && npm run build && npm run smoke:fixtures",
     "smoke:imports": "tsx scripts/smoke-import-mode.ts",
-    "smoke:scoring": "tsx scripts/smoke-scoring-mode.ts"
+    "smoke:scoring": "tsx scripts/smoke-scoring-mode.ts",
+    "smoke:reports": "tsx scripts/smoke-report-mode.ts"
   },
   "dependencies": {
+    "@react-pdf/renderer": "4.9.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
     "csv-parse": "7.0.3",

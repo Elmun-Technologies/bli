@@ -2,7 +2,7 @@
 
 A modular Web GIS and location-intelligence workspace for commercial site selection, customer coverage and market analysis. The first pilot is Tashkent, Uzbekistan; the application architecture is city- and country-agnostic.
 
-> **Phase 5 (CSV/XLSX import, validation and geocoding) is implemented; Phases 1-4 are frozen and the clean database gate is green in GitHub Actions.** The public synthetic demo (`/api/demo/*`) is unchanged: display-safe PostGIS viewport features and `ST_DWithin` radius aggregates for the fixed demo workspace, served with a server-only elevated credential. The tenant path is unchanged too: email/password sign-in, server-validated sessions, a protected `/workspaces/[workspaceId]` route whose membership and role are resolved in the database, and authenticated viewport/analytic endpoints that run under the caller's own RLS-aware session. Phase 5 adds a six-step import wizard (upload, columns, mapping, validation, geocoding, commit) on top of the same trust model: a private per-workspace storage bucket, staging tables (`import_jobs`, `import_rows`), owner/admin/analyst-only writes, provider-abstracted geocoding that is Mapbox-permanent-only in production and a deterministic fake in CI, and a transactional commit that promotes validated rows into `customers`/`locations` with provenance. Bad rows are never silently discarded. Local database execution is unavailable in this workspace; CI is the verified database environment.
+> **Phase 7 (executive decision reports with server-side PDF generation) is implemented; Phases 1-6.5 are frozen and the clean database gate is green in GitHub Actions.** The public synthetic demo (`/api/demo/*`) is unchanged: display-safe PostGIS viewport features and `ST_DWithin` radius aggregates for the fixed demo workspace, served with a server-only elevated credential. The tenant path is unchanged too: email/password sign-in, server-validated sessions, a protected `/workspaces/[workspaceId]` route whose membership and role are resolved in the database, and authenticated viewport/analytic endpoints that run under the caller's own RLS-aware session. Phase 5 adds a six-step import wizard (upload, columns, mapping, validation, geocoding, commit) on top of the same trust model: a private per-workspace storage bucket, staging tables (`import_jobs`, `import_rows`), owner/admin/analyst-only writes, provider-abstracted geocoding that is Mapbox-permanent-only in production and a deterministic fake in CI, and a transactional commit that promotes validated rows into `customers`/`locations` with provenance. Bad rows are never silently discarded. Phase 7 adds executive decision reports on top of the same model: a report is built once from an immutable stored-analysis snapshot whose SHA-256 is verified before every render, is previewed as HTML and rendered to PDF server-side by `@react-pdf/renderer` (no browser, no Docker), embeds a provider-abstracted static map that never contains a customer point, is stored in a private bucket behind membership-scoped policies, and never claims to predict anything. Local database execution is unavailable in this workspace; CI is the verified database environment.
 
 ## Current capabilities
 
@@ -18,6 +18,7 @@ A modular Web GIS and location-intelligence workspace for commercial site select
 - **Phase 4 membership:** `workspace_members` maps auth users to workspaces with a role (`owner`, `admin`, `analyst`, `viewer`). The workspace selector lists only memberships the database returns for the caller.
 - **Phase 4 tenant GIS:** `GET /api/workspaces/[workspaceId]/map/features` and `POST /api/workspaces/[workspaceId]/analysis/radius` validate the session, resolve membership, then execute a membership-asserting RPC under the caller's own session. A foreign workspace id and a non-existent one return the identical `403` body.
 - **Phase 6 scoring:** `GET/POST /api/workspaces/[workspaceId]/scoring-models`, `GET/PATCH …/scoring-models/[modelId]`, `GET/POST …/projects`, `GET/POST …/candidates`, `GET/POST …/analyses`, `GET …/analyses/[analysisId]` and `POST …/comparisons` (candidates, analyses and comparisons are project-scoped; `…/projects` is the explicit selector/creation endpoint added in Phase 6.5). A workspace model defines factors (metric, weight, direction, normalization, configuration); every score is a stored weighted sum on a 0–100 scale that the interface explains as raw → normalized → weight → contribution → total, and every analysis snapshots the model revision, weights and metrics it was run with. Nothing is scored automatically and no score is ever presented as a probability, a confidence or a prediction.
+- **Phase 7 reports:** `GET/POST /api/workspaces/[workspaceId]/reports` plus `GET …/reports/[reportId]`, `PATCH`, `POST …/generate`, `GET …/download`, `GET …/map` and `GET/PUT/DELETE …/logo`. Every report is generated from an immutable stored-analysis snapshot, rendered to PDF server-side and stored privately; the preview and the PDF share one `ReportViewModel`.
 - **Phase 5 imports:** `POST /api/workspaces/[workspaceId]/imports` and its `file`, `mapping`, `geocode-batch`, `commit`, `rows`, `rows/{rowId}/point` and `errors.csv` children. CSV/XLSX uploads are sniffed by content (never MIME), stored in the private `workspace-imports` bucket and staged; every row ends `valid`, `needs_geocoding` or `invalid` with a machine-readable code, and nothing reaches a production table until an explicit, transactional, idempotent commit.
 
 ## Phase 4 authentication, membership and RLS
@@ -54,6 +55,19 @@ Details: [docs/imports.md](docs/imports.md) and [docs/geocoding.md](docs/geocodi
 - **Explicit project context (Phase 6.5).** Saved candidates, analyses and comparisons are project-scoped, and the project is never guessed: the Locations section shows a project selector (`GET/POST …/projects`), every candidate/analysis/comparison call carries a `projectId`, the server verifies it against the caller's own workspace projects, an unnamed project in a multi-project workspace is a safe `400`, and a project of another workspace fails identically to one that does not exist. Switching projects clears the current candidate and comparison selections, and a comparison can never mix candidates of two projects. Scoring models stay workspace-owned and reusable across projects; a project selects from them and creates no copy.
 
 Details: [docs/scoring.md](docs/scoring.md).
+
+## Phase 7 executive decision reports (stored snapshot → PDF)
+
+- **From a stored analysis, never from live data.** `POST /api/workspaces/{workspaceId}/reports` builds an immutable snapshot from the stored analysis payload (scores, ranks, metrics, contributions, factor definitions as used), stores its SHA-256 and freezes it with a database trigger. Generating a PDF is a second, explicit step.
+- **Regeneration means the same snapshot.** A new model revision or newer data never changes an old report; that requires a new analysis and a new report. Every generation recomputes the hash and refuses to render a snapshot that does not match it.
+- **No prediction claims.** The report is decision support: `82.40 / 100` plus a qualitative band, a deterministic summary assembled from the stored contributions (no LLM), and a disclaimer. There is no success probability, no ROI, no "AI recommends" and no forecast.
+- **The PDF is produced in Node** by `@react-pdf/renderer` (exact-pinned): no Chromium, no Playwright/Puppeteer, no Docker and no network at render time. The HTML preview renders the *same* view model, so the two can never disagree about a number.
+- **Static maps are provider-abstracted.** Mapbox Static Images in production (`MAPBOX_ACCESS_TOKEN`, server-side only, attribution always preserved), a deterministic committed PNG fixture in tests and CI (`REPORT_MAP_PROVIDER=fake`, no token, no credits), and an honest "no map" note when no provider is configured. A provider failure fails the report safely and offers a retry; a misleading blank map is never produced. Maps contain no customer points.
+- **Private by construction.** Artifacts live in the private `analysis-reports` bucket under `{workspace}/{project}/{report}/…`; the database enforces the path prefix, storage policies are membership-scoped, no public URL is ever returned, and the authorized download route re-checks the session, the membership and the row before reading the object.
+- **Permissions.** Viewers list, preview and download ready reports; owner/admin/analyst create and generate; owner/admin manage branding (company name, PNG/JPEG logo ≤ 2 MB, validated by content). Reports are never deleted.
+- **No customer-level PII** anywhere: snapshot, view model, preview, PDF text, map requests or stored artifacts — asserted by unit tests and by the contract smoke with recognisable markers.
+
+Details: [docs/reports.md](docs/reports.md).
 
 ## Phase 2 database foundation (unchanged)
 
@@ -183,6 +197,14 @@ npm run smoke:imports    # needs the same; geocoding runs on the deterministic f
 
 Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/admin.ts` from a Client Component, and never log either key. `SUPABASE_ANON_KEY` is required for sign-in and the authenticated routes; the elevated key is used only by the public demo path, the operator bootstrap and CI setup. RLS is enabled everywhere with member-scoped policies: a policy never replaces a `GRANT`, and both layers are asserted in CI.
 
+## Reports environment variables
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `MAPBOX_ACCESS_TOKEN` | for static report maps | Server-only Mapbox token for the Static Images API. Never `NEXT_PUBLIC_*`; never returned to a client. Without it a report is generated without a map and says so. |
+| `REPORT_MAP_STYLE` | no | Mapbox style used for report maps (default `mapbox/light-v11`). |
+| `REPORT_MAP_PROVIDER` | no | Set to `fake` to use the deterministic committed PNG fixture: no network, no token, no map credits. Used by `npm run smoke:reports` and CI. |
+
 ## Roadmap
 
 1. **Phase 1 — foundation (implemented):** Next.js, Tailwind, MapLibre shell, synthetic Tashkent fixtures.
@@ -192,7 +214,8 @@ Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/ad
 5. **Phase 5 — data operations (implemented):** CSV/XLSX imports with column mapping, per-row validation, provenance, private storage, provider-abstracted geocoding (Mapbox permanent results, fake provider in CI), manual placement, transactional commit and a safe error export.
 6. **Phase 6 — intelligence (implemented):** configurable, explainable location scoring with versioned model snapshots, saved candidate sites and a 2–5 site comparison.
 7. **Phase 6.5 — project-context hardening (implemented):** explicit project selection for saved candidates, analyses, comparisons and history; no implicit oldest/first-project resolution anywhere.
-7. **Phase 7 — reporting, tiles and optimization (not started):** vector tiles/`ST_AsMVT` at larger scale, exports and performance work.
+8. **Phase 7 — executive decision reports (implemented):** immutable analysis snapshots with SHA-256 integrity, deterministic executive summaries, provider-abstracted static maps, server-side PDF generation with `@react-pdf/renderer`, private artifact storage and role-aware preview/download.
+9. **Phase 8 — scale and optimization (not started):** vector tiles/`ST_AsMVT` at larger scale, portfolio analytics and performance work.
 
 ## Documentation
 
@@ -205,3 +228,4 @@ Never use `NEXT_PUBLIC_*` for an elevated key, never import `src/lib/supabase/ad
 - [Imports: formats, limits, geocoding and commit](docs/imports.md)
 - [Geocoding providers, Mapbox v6 and confidence policy](docs/geocoding.md)
 - [Location scoring: factors, normalization, snapshots and permissions](docs/scoring.md)
+- [Executive decision reports: snapshots, PDF generation, maps and permissions](docs/reports.md)

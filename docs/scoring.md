@@ -294,8 +294,19 @@ ring — the ring remains presentation, PostGIS remains the measurement.
 ## 11. What Phase 6 deliberately does not do
 
 No AI recommendations, no LLM scoring, no predictive ML, no forecasting, no routing, no territory
-optimization, no PDF reports, no billing, no CRM sync, no vector tiles and no national demographic
-datasets. Performance is not a Phase 6 concern: analyses are small, explicit user actions.
+optimization, no billing, no CRM sync, no vector tiles and no national demographic datasets.
+Performance is not a Phase 6 concern: analyses are small, explicit user actions.
+
+## 11b. Reports read stored analyses (Phase 7)
+
+Phase 7 added the PDF report on top of these snapshots without changing any
+scoring semantics: a report copies the stored analysis payload verbatim (scores,
+ranks, raw and normalized metrics, contributions and the factor definitions the
+run used), re-validates the candidate count and type, and freezes the copy behind
+a SHA-256. Nothing in the report path re-runs normalization, ranking or
+`ST_DWithin`, and a report is never recalculated when a model revision or the
+workspace data changes — that requires a new analysis and a new report. See
+[docs/reports.md](reports.md).
 
 ## 12. Tests
 
@@ -313,6 +324,17 @@ datasets. Performance is not a Phase 6 concern: analyses are small, explicit use
   the editor's rule mirror, request validation, normalization/formatting, sorting, CSV escaping and
   the parser, plus contract tests that parse payloads captured verbatim from the shipped
   `location_analysis_payload` RPC.
+* **Report unit suites** (`src/lib/reports/reports.test.ts`, `map/map.test.ts`,
+  `pdf/pdf.test.ts`): the snapshot projection, canonicalization and hash, mutation
+  detection, the deterministic summary, the single formatting path, parser
+  strictness, request/logo validation, provider selection and request
+  construction, and the PII and claim-free regressions — all from the same
+  captured payloads the scoring suite uses.
+* **Report smoke** (`scripts/smoke-report-mode.ts`, CI only, `REPORT_MAP_PROVIDER=fake`): creates a
+  report from a fresh stored comparison, generates the PDF, downloads and parses
+  it, verifies regeneration stability and branding, and asserts every documented
+  refusal (roles, foreign workspace, outsider, anonymous, tampered ids, draft
+  download, cross-project analysis).
 * **Scoring smoke** (`scripts/smoke-scoring-mode.ts`, CI only): drives the shipped API end to end
   against a clean Supabase stack — models, saved candidates, an analysis, a comparison, the stored
   read, snapshot survival across a model edit, the refusal paths and the CSV export — and parses every

@@ -110,13 +110,13 @@ CREATE TABLE public.workspace_members (
 
 ## Permission matrix (as implemented)
 
-| Role | Read | Analytical write | Data administration | Imports (Phase 5) | Scoring (Phase 6) | Membership administration | Owner assignment |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| **viewer** | workspace, organization (via membership), projects, datasets, project_datasets, locations, customers, competitors, branches, analysis_locations, membership roster of their own workspace(s); authenticated viewport + radius RPCs; import job metadata and staged-row preview; scoring models, saved candidates and stored analyses | none | none | **read-only**: no upload, no mapping, no geocoding claim, no commit, no stored source file | **read-only**: models, saved candidates, stored analyses and comparisons; cannot run an analysis or save a candidate | none (cannot even change their own role) | no |
-| **analyst** | viewer reads | locations, customers, competitors, analysis_locations (insert/update/delete inside their workspace) | none — projects, datasets, branches are read-only | create jobs, upload, map, validate, geocode, place points manually, commit into an **existing** dataset; cannot create a dataset | run analyses and comparisons, save candidate locations; **cannot create or edit a scoring model** | none | no |
-| **admin** | all member reads | all analytical writes | projects, datasets, project_datasets, branches, business data | full import administration, including creating a destination dataset at commit time | run scoring and create, edit or archive scoring models | add/change/remove `viewer`, `analyst`, `admin` | no |
-| **owner** | all member reads | all analytical writes | full data administration plus workspace settings (`name`, `metadata`) | full import administration, including creating a destination dataset at commit time | run scoring and create, edit or archive scoring models | full membership administration, including owner grant/change/remove subject to last-owner protection | yes |
-| **service_role** | platform-default elevated access | operator paths only | `bootstrap_workspace_owner`, `grant_workspace_owner` | operator bootstrap only | none on the tenant scoring path: no scoring RPC or table is granted to `service_role`, and no code calls it | yes (operator) | no |
+| Role | Read | Analytical write | Data administration | Imports (Phase 5) | Scoring (Phase 6) | Reports (Phase 7) | Membership administration | Owner assignment |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| **viewer** | workspace, organization (via membership), projects, datasets, project_datasets, locations, customers, competitors, branches, analysis_locations, membership roster of their own workspace(s); authenticated viewport + radius RPCs; import job metadata and staged-row preview; scoring models, saved candidates and stored analyses; **report history, preview and ready PDF downloads** | none | none | **read-only**: no upload, no mapping, no geocoding claim, no commit, no stored source file | **read-only**: models, saved candidates, stored analyses and comparisons; cannot run an analysis or save a candidate | **read-only**: list, preview and download ready reports; cannot create, generate, retry, rename or brand | none (cannot even change their own role) | no |
+| **analyst** | viewer reads | locations, customers, competitors, analysis_locations (insert/update/delete inside their workspace) | none — projects, datasets, branches are read-only | create jobs, upload, map, validate, geocode, place points manually, commit into an **existing** dataset; cannot create a dataset | run analyses and comparisons, save candidate locations; **cannot create or edit a scoring model** | create a report from a stored analysis, generate/regenerate/retry its PDF, preview and download; **cannot brand or rename** | none | no |
+| **admin** | all member reads | all analytical writes | projects, datasets, project_datasets, branches, business data | full import administration, including creating a destination dataset at commit time | run scoring and create, edit or archive scoring models | everything an analyst can do, plus report branding (title, company name, logo) | add/change/remove `viewer`, `analyst`, `admin` | no |
+| **owner** | all member reads | all analytical writes | full data administration plus workspace settings (`name`, `metadata`) | full import administration, including creating a destination dataset at commit time | run scoring and create, edit or archive scoring models | everything an admin can do; reports are never deleted by anyone | full membership administration, including owner grant/change/remove subject to last-owner protection | yes |
+| **service_role** | platform-default elevated access | operator paths only | `bootstrap_workspace_owner`, `grant_workspace_owner` | operator bootstrap only | none on the tenant scoring path: no scoring RPC or table is granted to `service_role`, and no code calls it | none on the tenant report path: no report table, bucket or RPC is granted to `service_role`, and no code calls it | yes (operator) | no |
 
 Branch data is intentionally owner/admin-only: nothing in Phase 1–3 required an
 analyst to create branches, so the conservative choice is the implemented one.
@@ -186,6 +186,13 @@ its own work; every privileged transition (claiming geocoding work, applying
 results, manual placement, committing, refreshing counters) is a
 `SECURITY INVOKER` function that repeats the owner/admin/analyst assertion
 itself, because a policy alone cannot express "only through this workflow".
+
+## Report tables and storage policies (Phase 7)
+
+| Object | Policy summary |
+| --- | --- |
+| `public.analysis_reports` | `SELECT` for any member of the row's workspace (`is_workspace_member`); `INSERT` only for owner/admin/analyst (`has_workspace_role(..., {owner,admin,analyst})`), and only with the caller's own `created_by`, a snapshot, a snapshot hash and `status = 'draft'`; `UPDATE` scoped the same way for the lifecycle, branding and presentation fields. **No `DELETE` grant for any role**, and no `anon` privilege at all. The `_protect_snapshot` trigger raises `42501` if an authorized updater tries to change the snapshot, its hash, the analysis link, the type, the creator or the creation timestamp, and `_prevent_move` blocks re-parenting. |
+| `storage.objects` (bucket `analysis-reports`) | `SELECT` for any member and `INSERT`/`UPDATE` for owner/admin/analyst, each deriving the workspace from the **first three** object-path segments through `report_object_workspace_id(name)` (a malformed path resolves to `NULL` and grants nothing) and then calling the membership helper. **No `DELETE` policy and no `anon` policy**, so stored report artifacts are append-only from the client's perspective. The table's own CHECK constraints additionally require every stored path to start with the row's `workspace_id/project_id/report_id/` prefix, which makes a storage-path swap a constraint violation rather than a working exploit. |
 
 ## PostgreSQL grants
 
@@ -376,6 +383,17 @@ cookie-aware anon client under the caller's own session; the scoring tables gran
 looks up membership in JavaScript and then switches to an elevated client, so RLS
 and the RPC's own membership assertion stay independent of the route guard.
 
+**Phase 7 adds no new elevated-credential use either.** The report routes use the
+same cookie-aware anon client: the history, the preview, the creation, the
+generation, the logo upload and the authorized download all run under the
+caller's own session, so RLS on `analysis_reports` and the membership-scoped
+`storage.objects` policies apply on every read and write. The report tables and
+the `analysis-reports` bucket grant `service_role` nothing. The static-map token
+(`MAPBOX_ACCESS_TOKEN`) is a *separate* server-only secret: it is read only in
+`src/lib/reports/map/mapbox-provider.ts`, is never a `NEXT_PUBLIC_*` variable, is
+never stored in a snapshot, a response, a log line or an artifact, and CI runs
+with the deterministic fake provider so no build needs it at all.
+
 **Phase 6.5 adds no new elevated-credential use either.** The project list and the
 explicit project-creation endpoint (`/api/workspaces/{workspaceId}/projects`) run
 through the same cookie-aware client: the read is filtered by the member policy on
@@ -414,6 +432,27 @@ under test are exactly the policies PostgREST applies:
 * parity between the authenticated viewport/radius RPCs and the Phase 3 demo
   RPCs, plus PII checks (no customer display names, no workspace B isolation
   rows), and that the demo RPCs stay `service_role`-only.
+
+`supabase/tests/phase7_reports_rls.sql` extends the technique to Phase 7 and
+executes, as the real roles and with a workspace built from scratch inside the
+transaction (so it does not depend on the demo seed):
+
+* the read matrix — a viewer lists, previews and (for a ready report) downloads,
+  while a non-member, a foreign-workspace member and `anon` see nothing;
+* the write matrix — owner/admin/analyst create and generate, a viewer's insert
+  is refused and its update changes no row (RLS filters silently, so the suite
+  asserts the row count rather than a raise);
+* ownership — a report cannot be created from another workspace's analysis, from
+  another project's analysis, or with a `storage_path` outside its own
+  `workspace/project/report` prefix; re-parenting a row raises;
+* the lifecycle matrix — `draft → generating → ready` requires an artifact and a
+  `generated_at`, `ready → draft` is refused (`23514`), `failed → generating` is
+  the documented retry, and a `ready` row can be regenerated;
+* snapshot immutability — `UPDATE` on `snapshot`, `snapshot_hash`, `analysis_id`,
+  `report_type`, `created_by` or `created_at` raises `42501` even for the owner;
+* storage — the bucket is private with the documented limits, a viewer cannot
+  write an object, a foreign member cannot read another workspace's prefix, and a
+  malformed or swapped path resolves to `NULL`.
 
 `supabase/tests/phase5_import_rls.sql` and `supabase/tests/phase5_geocoding.sql`
 extend the same technique to Phase 5 and assert, among other things: a reviewer
@@ -496,6 +535,19 @@ zero on PostgreSQL 17.11 / PostGIS 3.3.7 and passed:
 The suite has also been run locally on a PGlite PostgreSQL 18.3 / PostGIS 3.6.2
 harness that applies the same migrations against a faithful `auth` schema; it is
 a supplementary harness, not a substitute for the CI database gate.
+
+The report smoke (`scripts/smoke-report-mode.ts`, run by `npm run smoke:reports`
+with `REPORT_MAP_PROVIDER=fake`) drives the shipped report routes and the shipped
+client: it validates the PDF bytes it downloads (real `%PDF`, size, pagination,
+the stored score, every candidate, every factor, the disclaimer) and asserts the
+documented refusals — a foreign workspace owner (`403`, and `404` when the report
+is addressed inside their own workspace), an outsider (`403`), an anonymous
+caller (`401` with the safe session message), an unknown report id (`404`), a
+download before generation (`400 report_not_ready`), a viewer creating or
+generating (`403`), an SVG or oversized logo (`400`), a report created from
+another project's analysis (`400`), and a path query that must be ignored. It
+also fails the run if any customer-level marker or any prediction-style claim
+appears in the snapshot, the preview JSON, the PDF text or the map artifact.
 
 `scripts/smoke-auth-mode.ts` adds the browser-level path in CI: it starts the
 production build, signs in with the seeded identities through the shipped routes
