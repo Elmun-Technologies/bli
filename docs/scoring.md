@@ -167,9 +167,17 @@ lookup is needed to explain an old score.
 3. `POST /api/workspaces/{workspaceId}/comparisons` runs and stores the comparison.
 4. The map shows the candidates simultaneously, labelled A–E in stored rank order, and clicking a
    marker opens that candidate's breakdown.
-5. The table lists overall score, customers, revenue, competitors, nearest branch, POI count customer
-   density, competition score, opportunity score, and sorts by overall score, customer potential,
-   competition or revenue. Sorting never changes a number, only the order.
+5. The table lists overall score, customers, revenue, competitors, nearest branch, POI count and
+   customer density, and sorts by overall score, customer potential, competition or revenue. Sorting
+   never changes a number, only the order. Two columns are derived from the stored contributions and
+   are labelled as such:
+   * **competition score** — the stored normalized value of the model's negative factor whose metric
+     contains `competitor` (usually `competitors_count`); it shows `—` when the model has no such
+     factor, and it is never invented from some other metric.
+   * **opportunity score** — the sum of the stored contributions of the `positive`-direction
+     factors, i.e. the demand side of *this* model, not a separate index.
+   Both are read straight from the stored payload; neither is recomputed or re-weighted in the
+   browser.
 6. Clicking a row (or a marker) opens the raw → normalized → weight → contribution table for that
    candidate, and the panel verifies that the stored contributions still add up to the stored score
    before showing them.
