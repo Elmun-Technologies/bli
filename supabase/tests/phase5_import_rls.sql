@@ -123,10 +123,35 @@ BEGIN
 END;
 $phase5_error$;
 
--- A stored object is removed through the Storage API, never through SQL: the
--- platform protects storage.objects with a BEFORE DELETE trigger, and the
--- membership-scoped DELETE policy is what authorizes the API call. Whatever the
--- reason a direct attempt is refused, the file itself must survive.
+-- A stored object is removed through the Storage API, never through SQL. The
+-- platform protects storage.objects with a BEFORE DELETE trigger, which fires
+-- even when row level security would filter every row, so a direct attempt is
+-- refused (or scoped to zero rows on a deployment without that trigger) and the
+-- file survives. The membership-scoped DELETE policy is what authorizes the
+-- Storage API call that really removes a file.
+CREATE FUNCTION pg_temp.phase5_expect_delete_refused(p_description text, p_delete_sql text)
+RETURNS void
+LANGUAGE plpgsql
+AS $phase5_delete_refused$
+DECLARE
+  refused boolean := false;
+  affected bigint := 0;
+BEGIN
+  BEGIN
+    EXECUTE p_delete_sql;
+    GET DIAGNOSTICS affected = ROW_COUNT;
+  EXCEPTION WHEN others THEN
+    refused := true;
+  END;
+
+  IF NOT refused AND affected <> 0 THEN
+    RAISE EXCEPTION 'DELETE CASE FAILED (% row(s) removed): %', affected, p_description;
+  END IF;
+  RAISE NOTICE 'delete refused (raised: %, rows removed: %): %', refused, affected, p_description;
+END;
+$phase5_delete_refused$;
+
+
 CREATE FUNCTION pg_temp.phase5_expect_storage_preserved(
   p_description text,
   p_delete_sql text,
@@ -150,6 +175,7 @@ END;
 $phase5_preserved$;
 
 GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_denied(text, text) TO authenticated;
+GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_delete_refused(text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_storage_preserved(text, text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_zero_rows(text, text) TO authenticated;
 GRANT EXECUTE ON FUNCTION pg_temp.phase5_expect_count(text, text, bigint) TO authenticated;
@@ -729,7 +755,7 @@ BEGIN
         AND name = ''00000000-0000-4000-8000-000000000010/11111111-1111-4111-8111-111111111111/source.csv''',
     0
   );
-  PERFORM pg_temp.phase5_expect_zero_rows(
+  PERFORM pg_temp.phase5_expect_delete_refused(
     'deleting a workspace A import file from workspace B',
     'DELETE FROM storage.objects
       WHERE bucket_id = ''workspace-imports''
