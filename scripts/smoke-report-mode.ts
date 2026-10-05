@@ -948,6 +948,9 @@ async function main() {
       'a project of another workspace',
     );
 
+    // Back to the owner of workspace A: the last checks above ran as the other
+    // workspace's owner on purpose, and this jar decides every following call.
+    activeJar = ownerJar;
     const finalHistory = await listReports(WORKSPACE_A, projectId);
     assert(
       finalHistory.reports.some((report) => report.id === created.id),
