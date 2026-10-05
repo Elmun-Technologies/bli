@@ -1,0 +1,198 @@
+name: Database integrity
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: database-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Clean Supabase/PostGIS verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js and npm cache
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.22.3
+          cache: npm
+
+      - name: Install the locked Supabase CLI
+        uses: supabase/setup-cli@45a513f8c64c0bc8e0e3dfe572b5c95be85f6359 # v3.0.1
+
+      - name: Install project dependencies
+        run: npm ci
+
+      - name: Verify Supabase CLI version from lockfile
+        run: |
+          set -Eeuo pipefail
+          expected="$(node -p "require('./package.json').devDependencies.supabase")"
+          actual="$(supabase --version)"
+          printf 'Supabase CLI: %s (package-lock expected %s)\n' "$actual" "$expected"
+          test "$actual" = "$expected"
+
+      - name: Install PostgreSQL client for live catalog assertions
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+          psql --version
+
+      - name: Clean-reset Supabase/PostGIS/Storage, seed synthetic demo, run Phase 2/3/4/5/6 assertions, and generate types
+        id: verify_database
+        run: npm run verify:database
+
+      - name: Upload complete database verification output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: database-verification-log-${{ github.run_id }}
+          path: ${{ runner.temp }}/bli-database-verification.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Ensure generated database types are checked in and current
+        run: |
+          set -Eeuo pipefail
+          generated_file=src/lib/database/database.types.ts
+          if ! git ls-files --error-unmatch -- "$generated_file" >/dev/null 2>&1; then
+            echo "::error::Generated database types are missing from the repository. Run npm run verify:database and commit $generated_file."
+            exit 1
+          fi
+          if ! git diff --quiet -- "$generated_file"; then
+            echo "::error::Generated database types differ from the freshly migrated schema. Run npm run verify:database and commit the regenerated file."
+            git --no-pager diff -- "$generated_file"
+            exit 1
+          fi
+          echo "Committed database.types.ts matches the clean local schema."
+
+      - name: Upload generated types for database-schema review
+        if: always() && steps.verify_database.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-database-types-${{ github.run_id }}
+          path: src/lib/database/database.types.ts
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Application tests
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Production build
+        run: npm run build
+
+      - name: Fixtures-mode end-to-end smoke (shipped client against shipped routes)
+        run: npm run smoke:fixtures
+
+      - name: Export the local Supabase credentials for the authenticated smoke test
+        run: |
+          set -Eeuo pipefail
+          status_file="$RUNNER_TEMP/supabase-status.env"
+          status_err="$RUNNER_TEMP/supabase-status.err"
+
+          # `supabase status --output env` only prints DB_URL by default in CLI
+          # 2.119.0, and key names differ between CLI generations
+          # (ANON_KEY/SERVICE_ROLE_KEY versus PUBLISHABLE_KEY/SECRET_KEY), so
+          # ask for the names this project uses with --override-name and fall
+          # back through every generation. Values are never printed; only the
+          # variable names, so a failure is diagnosable from CI annotations.
+          capture() {
+            if supabase status --output env "$@" > "$status_file" 2> "$status_err"; then
+              awk -F= 'NF && $1 ~ /^[A-Za-z_][A-Za-z0-9_]*$/ { print "::notice title=local Supabase status variable::" $1 }' "$status_file"
+              return 0
+            fi
+            printf '::notice title=supabase status attempt failed::%s\n' "$(head -c 300 "$status_err" | tr '\n' ' ' | tr -d '%')"
+            return 1
+          }
+
+          lookup() {
+            local key value
+            for key in "$@"; do
+              value="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); gsub(/^"|"$/, ""); print; exit }' "$status_file")"
+              if [[ -n "$value" ]]; then printf '%s' "$value"; return 0; fi
+            done
+            return 1
+          }
+
+          api_url=''; anon_key=''; service_key=''
+          resolve_credentials() {
+            api_url="$(lookup SUPABASE_URL API_URL api_url)" || api_url=''
+            anon_key="$(lookup SUPABASE_ANON_KEY ANON_KEY PUBLISHABLE_KEY publishable_key)" || anon_key=''
+            service_key="$(lookup SUPABASE_SECRET_KEY SUPABASE_SERVICE_ROLE_KEY SERVICE_ROLE_KEY SECRET_KEY service_role_key secret_key)" || service_key=''
+            [[ -n "$api_url" && -n "$anon_key" && -n "$service_key" ]]
+          }
+
+          resolved='no'
+          if capture --override-name api.url=SUPABASE_URL --override-name auth.anon_key=SUPABASE_ANON_KEY --override-name auth.service_role_key=SUPABASE_SECRET_KEY && resolve_credentials; then
+            resolved='yes (legacy anon/service names)'
+          elif capture --override-name api.url=SUPABASE_URL --override-name auth.publishable_key=SUPABASE_ANON_KEY --override-name auth.secret_key=SUPABASE_SECRET_KEY && resolve_credentials; then
+            resolved='yes (publishable/secret names)'
+          elif capture && resolve_credentials; then
+            resolved='yes (default env output)'
+          fi
+
+          if [[ "$resolved" == 'no' ]]; then
+            echo '::error::supabase status did not expose the URL and both API keys; see the local Supabase status variable annotations for the emitted names' >&2
+            exit 1
+          fi
+
+          {
+            printf 'SUPABASE_URL=%s\n' "$api_url"
+            printf 'SUPABASE_ANON_KEY=%s\n' "$anon_key"
+            printf 'SUPABASE_SECRET_KEY=%s\n' "$service_key"
+          } >> "$GITHUB_ENV"
+          printf '::notice title=Local Supabase credentials for the authenticated smoke::resolved %s; API %s\n' "$resolved" "$api_url"
+
+      - name: Authenticated end-to-end smoke (session, membership, tenant GIS, demo isolation)
+        run: npm run smoke:auth
+
+      - name: Import end-to-end smoke (upload, mapping, validation, fake geocoder, commit, GIS visibility)
+        run: npm run smoke:imports
+
+      - name: Import smoke failure diagnostics
+        if: failure()
+        run: |
+          printf '::notice title=import smoke::the smoke prints the failing scenario and the server log tail; geocoding runs on GEOCODING_PROVIDER=fake, so CI needs no Mapbox token and spends no geocoding credits.\n'
+
+      - name: Scoring end-to-end smoke (models, candidates, analysis, comparison, snapshot, refusals)
+        run: npm run smoke:scoring
+
+      - name: Scoring smoke failure diagnostics
+        if: failure()
+        run: |
+          printf '::notice title=scoring smoke::the smoke drives the shipped scoring API, parses every response with the shipped parser and prints the failing scenario plus the server log tail.\n'
+
+      - name: Report end-to-end smoke (create, snapshot, map provider, PDF, download, refusals)
+        run: npm run smoke:reports
+        env:
+          REPORT_MAP_PROVIDER: fake
+
+      - name: Report smoke failure diagnostics
+        if: failure()
+        run: |
+          printf '::notice title=report smoke::the smoke drives the shipped report API with the deterministic fake map provider (no Mapbox token, no map credits), parses every response with the shipped parser and prints the failing scenario plus the server log tail.\n'
+          failure_file="${RUNNER_TEMP}/report-smoke-failure.txt"
+          if [ -s "$failure_file" ]; then
+            printf '::error title=report smoke::%s\n' "$(tr '\n' ' ' < "$failure_file" | cut -c1-900)"
+          fi
+
+      - name: Stop local Supabase stack
+        if: always()
+        run: supabase stop --no-backup || true
